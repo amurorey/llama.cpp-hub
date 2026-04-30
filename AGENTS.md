@@ -549,13 +549,15 @@ SslHandler (可选)
 #### 基准测试
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/models/benchmark` | POST | V1 基准测试（直接运行 `llama-bench`）。Body: `{modelId, cmd, llamaBinPath}` |
-| `/api/models/benchmark/list` | GET | 列出 V1 测试结果文件。Query: `modelId` |
-| `/api/models/benchmark/get` | GET | 获取 V1 测试结果。Query: `fileName` |
-| `/api/models/benchmark/delete` | POST | 删除 V1 测试结果。Query: `fileName` |
-| `/api/v2/models/benchmark` | POST | V2 基准测试（通过 `BenchmarkService`）。Body: `{modelId, promptTokens, maxTokens}` |
-| `/api/v2/models/benchmark/get` | GET | 获取 V2 测试记录。Query: `modelId` |
-| `/api/v2/models/benchmark/delete` | POST | 删除 V2 测试记录。Body: `{modelId, lineNumber}` |
+| `/api/models/benchmark` | POST | V1 基准测试（直接运行 `llama-bench`）。Body: `{modelId, cmd, llamaBinPath, [nodeId]}` |
+| `/api/models/benchmark/list` | GET | 列出 V1 测试结果文件。Query: `modelId, [nodeId]` |
+| `/api/models/benchmark/get` | GET | 获取 V1 测试结果。Query: `fileName, [nodeId]` |
+| `/api/models/benchmark/delete` | POST | 删除 V1 测试结果。Query: `fileName, [nodeId]` |
+| `/api/v2/models/benchmark` | POST | V2 基准测试（通过 `BenchmarkService`）。Body: `{modelId, promptTokens, maxTokens, [nodeId]}` |
+| `/api/v2/models/benchmark/get` | GET | 获取 V2 测试记录。Query: `modelId, [nodeId]` |
+| `/api/v2/models/benchmark/delete` | POST | 删除 V2 测试记录。Body: `{modelId, lineNumber, [nodeId]}` |
+
+**所有 benchmark 端点均支持 `nodeId` 远程代理**。V1/V2 的 run 和 V2 delete 使用 `callRemoteApiTracked(ctx, ...)`——将 HTTP 连接注册到 `ChannelHandlerContext`，客户端中断时自动断开远程请求。V1 的 list/get/delete 使用 `proxyGetRemote()` 代理 GET 请求。
 
 #### 代理端点
 | 端点 | 方法 | 说明 |
@@ -898,10 +900,30 @@ MCP 客户端注册的外部工具服务器。
 - 消息版本历史
 - 用户/助手前缀后缀模板
 
-#### `tools/benchmark-v2.html` — 基准测试工具
-**双面板布局：** 左侧（模型选择、prompt tokens 默认 8192、output max tokens 默认 256、并发数默认 1、运行/刷新按钮、所有模型列表+加载状态）+ 右侧（记录表格：时间/模型/prompt tokens/prefill 速度/output tokens/decode 速度/删除）
+#### 性能测试面板（`main-benchmark-v3`，已集成到 `index.html`）
 
-**功能：** 单次和并发基准测试、AbortController 取消、记录追加/替换模式、硬件信息缓存、单条删除
+替代了旧版 `tools/benchmark-v2.html`（外链页面）和模型列表中的 V1 测试按钮。
+
+**两个标签页：**
+
+| 标签页 | 说明 |
+|--------|------|
+| `llama-server`（默认） | 通过 `/v1/chat/completions` 测试已加载模型的推理性能。提示词长度 + 输出 token + 并发次数的单次/批量压测，柱状图 + 表格记录，支持 CSV/JSON/MD 导出 |
+| `llama-bench` | 直接运行 `llama-bench` 可执行文件的命令行测试，支持完整参数配置（从 `benchmark-params.json` 加载 35 个参数分组）、GPU 设备选择、主要 GPU、远程节点代理 |
+
+**功能特点：**
+- 节点筛选下拉框：全部/本机/远程节点，联动模型列表、llama.cpp 路径、设备列表
+- 远程模型：左侧彩色竖线 + 节点服务器徽章，文件大小独立行
+- 本机模型列表：hover 高亮 + active 选中 + loaded 绿色边框
+- 柱状图异常值截断（≥100000 → 显示为 1）、空数据清空图表
+- 未加载模型运行按钮自动 disabled
+- 参数缓存：确认保存 → 再次打开恢复（纯内存，刷新丢失）
+
+**独立页面：** `tools/benchmark-v3.html`（保留，功能等同于内联面板）
+
+**JS 文件：** `js/benchmark-v3.js`（~1400 行）。用 IIFE 包裹避免与 `model-action-modal.js` 全局函数冲突（`fieldNameFromParamConfig`、`renderParamField` 等）。仅暴露 `initServerTab`/`initBenchTab` 到 `window`。
+
+**⚠️ 重要陷阱：** benchmark 参数表单的 DOM ID 全部带 `bench_` 前缀（如 `param_bench_threads`），因为 `server-params.json` 和 `benchmark-params.json` 有很多重名参数（`--threads`、`--batch-size` 等）。ID 未隔离时 `getElementById` 会误读加载模型弹窗的表单值。
 
 #### `tools/mcp-manager.html` — MCP 管理工具
 **双面板布局：** 左侧（MCP 服务器列表：名称/URL/工具数）+ 右侧（选中服务器详情+工具列表：名称/描述/输入 schema JSON）
@@ -923,7 +945,8 @@ MCP 客户端注册的外部工具服务器。
 | `js/model-list.js` | 476 | 模型列表渲染（`sortAndRenderModels()`/`updateModelSlotsDom()`）、搜索、排序（名称/大小/参数）、收藏、加载状态 |
 | `js/model-detail.js` | 1312 | 模型详情弹窗：标签页（概览/采样/template/token 计数/kwargs/slots）、能力编辑、chat template kwargs 编辑、采样参数绑定、tokenize 测试 |
 | `js/model-action-modal.js` | 1599 | 加载/基准测试/停止模型弹窗：动态参数表单（从 `/api/models/param/server/list` 加载配置定义，渲染分组可折叠字段）、设备列表、VRAM 估算、启动配置管理（保存/删除/切换） |
-| `js/model-benchmark.js` | 709 | V1 基准测试：`llama-bench` 参数表单、结果展示、文件浏览/删除 |
+| `js/model-benchmark.js` | 709 | ~~V1 基准测试~~（已废弃，不再加载，benchmark-v3 替代） |
+| `js/benchmark-v3.js` | 1435 | 性能测试 V3 面板（IIFE 隔离，两标签页：llama-server + llama-bench，节点筛选，参数缓存） |
 | `js/settings.js` | 397 | 桌面设置页面：6 个标签页的读写/保存、配置加载/保存 |
 | `js/settings-mobile.js` | 208 | 移动端设置：通用设置（兼容开关+端口）、网络搜索设置（zhipu API key） |
 | `js/hf.js` | 651 | HuggingFace 搜索（桌面）：搜索、分页加载、模型结果网格、GGUF 文件弹窗、创建下载 |
@@ -1081,6 +1104,8 @@ buildLoadModelPayload()        ← 将表单状态序列化为 cmd 字符串
 10. **前端无 bundler** — 所有 JS 文件独立加载，用 `<script>` 标签引入，无模块系统
 11. **前端全局变量泛滥** — 大量使用 `window.*` 而非模块导入
 12. **WebSocket 紧耦合** — websocket.js 直接调用 model-list.js 的内部函数，改名或修改需要两端同步
+13. **benchmark 与加载模型弹窗 DOM ID 冲突** — `server-params.json` 和 `benchmark-params.json` 有很多重名参数（`--threads`、`--batch-size` 等）。benchmark-v3 的参数表单全部使用 `bench_` 前缀 ID（如 `param_bench_threads`），避免 `getElementById` 误读加载模型弹窗的值。新增 benchmark 相关参数务必保持前缀。
+14. **benchmark-v3.js 用 IIFE 隔离** — 内部函数（`fieldNameFromParamConfig`、`renderParamField` 等）不能污染全局，否则会覆盖 `model-action-modal.js` 同名函数，导致加载模型弹窗的 `ordered-multiselect` 退化为普通下拉框。
 
 ---
 
@@ -1094,6 +1119,7 @@ buildLoadModelPayload()        ← 将表单状态序列化为 cmd 字符串
 - `ModelActionController.loadRemoteModel()` — `body.remove("nodeId")`
 - `SystemController.handleVramEstimateRemote()` — `body.remove("nodeId")`
 - `ModelActionController.stopRemoteModel()` 创建新 body 不含 `nodeId`，安全
+- `ModelActionController` benchmark V1/V2 run 和 V2 delete — 使用 `callRemoteApiTracked(ctx, ...)` 替代 `NodeManager.callRemoteApi()`，将 HTTP 连接注册到 `ctx`，客户端中断时自动断开远程节点请求
 - GET 类代理请求无 body，通过 URL path 转发，不存在回环风险
 
 **聊天 API 的远程路由：** 前端在 `/v1/chat/completions` / `/v1/completions` / `/api/chat`（Ollama）请求体中添加 `nodeId` 字段，后端 `ChatStreamSession`（流式）和 `OpenAIService`（非流式）检测到 `nodeId` 后直接调用 `resolveRemoteModelUrl()` 将请求转发到远程节点，不再回退到遍历全部节点的兜底路径。`ChatRequestStreamingTransformer` 会在写入子进程输出前自动剥离 `nodeId` 字段。
