@@ -1,14 +1,14 @@
 // == Shared state objects (completely independent) ==
 const bench = {
   allModels: [], loadedModels: [], loadedModelIds: new Set(),
-  selectedModelId: '', filterText: '',
+  selectedModelId: '', selectedNodeId: '', filterText: '',
   historyFiles: [], selectedFileName: '', selectedFileData: null,
-  hardwareByModel: new Map(), paramConfig: [], devices: [],
+  hardwareByModel: new Map(),   paramConfig: [], devices: [], paramCache: null,
   llamaPaths: [], abortController: null, isRunning: false
 };
 const server = {
   allModels: [], loadedModels: [], loadedModelIds: new Set(),
-  selectedModelId: '', filterText: '', records: [], recordKeys: new Set(),
+  selectedModelId: '', selectedNodeId: '', filterText: '', records: [], recordKeys: new Set(),
   hardwareByModel: new Map(),
   abortController: null, isRunning: false
 };
@@ -16,8 +16,11 @@ const server = {
 // == DOM refs ==
 const E = {
   bench: {
-    select: document.getElementById('benchModelSelect'),
+    select: document.getElementById('benchModelList'),
     selText: document.getElementById('benchSelModelText'),
+    modelList: document.getElementById('benchModelList'),
+    modelsMeta: document.getElementById('benchModelsMeta'),
+    searchInput: document.getElementById('benchSearchInput'),
     output: document.getElementById('benchOutput'),
     outputMeta: document.getElementById('benchOutputMeta'),
     historyCount: document.getElementById('benchHistoryCount'),
@@ -25,7 +28,6 @@ const E = {
     copyBtn: document.getElementById('benchCopyBtn'),
     exportBtn: document.getElementById('benchExportBtn'),
     paramsContainer: document.getElementById('benchParamsContainer'),
-    paramsStatus: document.getElementById('benchParamsStatus'),
     paramsBtn: document.getElementById('benchParamsBtn'),
     paramsModal: document.getElementById('benchParamsModal'),
     paramsModalStatus: document.getElementById('benchParamsModalStatus'),
@@ -33,17 +35,15 @@ const E = {
     paramsCloseBtn: document.getElementById('benchParamsCloseBtn'),
     paramsConfirmBtn: document.getElementById('benchParamsConfirmBtn'),
     paramsDeviceList: document.getElementById('benchParamsDeviceList'),
+    mainGpuSelect: document.getElementById('benchMainGpuSelect'),
     runBtn: document.getElementById('runBenchBtn'),
-    progress: document.getElementById('benchProgress'),
-    progressBar: document.getElementById('benchProgressBar'),
-    statusText: document.getElementById('benchStatusText'),
-    llamaBinSelect: document.getElementById('benchLlamaBinSelect')
+    llamaBinSelect: document.getElementById('benchLlamaBinSelect'),
+    nodeFilter: document.getElementById('benchNodeFilter')
   },
   server: {
-    select: document.getElementById('serverModelSelect'),
-    searchInput: document.getElementById('serverSearchInput'),
     modelList: document.getElementById('serverModelList'),
     modelsMeta: document.getElementById('serverModelsMeta'),
+    searchInput: document.getElementById('serverSearchInput'),
     resultBody: document.getElementById('serverResultBody'),
     emptyRow: document.getElementById('serverEmptyRow'),
     selText: document.getElementById('serverSelModelText'),
@@ -52,9 +52,7 @@ const E = {
     maxTokens: document.getElementById('serverMaxTokens'),
     concurrency: document.getElementById('serverConcurrency'),
     runBtn: document.getElementById('runServerBtn'),
-    progress: document.getElementById('serverProgress'),
-    progressBar: document.getElementById('serverProgressBar'),
-    statusText: document.getElementById('serverStatusText'),
+    nodeFilter: document.getElementById('serverNodeFilter'),
     chartCanvas: document.getElementById('serverChartCanvas'),
     chartEmpty: document.getElementById('serverChartEmpty'),
     chartWrap: document.getElementById('serverChartWrap'),
@@ -65,7 +63,7 @@ const E = {
 // == Shared utils ==
 function t(key, fallback) { return (window.I18N && typeof window.I18N.t === 'function') ? window.I18N.t(key, fallback) : (fallback == null ? key : fallback); }
 function safeText(v) { return v == null ? '' : String(v); }
-function formatNumber(v) { const n = Number(v); if (!Number.isFinite(n)) return '-'; return n.toFixed(1).replace(/\.?0+$/, ''); }
+function formatNumber(v) { const n = Number(v); if (!Number.isFinite(n)) return '-'; if (n >= 100000) return '1'; return n.toFixed(1).replace(/\.?0+$/, ''); }
 function formatTimestamp(v) {
   if (v == null) return '-'; const raw = String(v).trim();
   if (/^\d{8}_\d{6}$/.test(raw)) return raw.slice(0,4)+'-'+raw.slice(4,6)+'-'+raw.slice(6,8)+' '+raw.slice(9,11)+':'+raw.slice(11,13)+':'+raw.slice(13,15);
@@ -98,6 +96,54 @@ function downloadBlob(blob, filename) {
   const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
   URL.revokeObjectURL(url);
 }
+function effectiveNodeId(state) {
+  return (state.selectedNodeId && state.selectedNodeId !== 'all' && state.selectedNodeId !== 'local') ? state.selectedNodeId : '';
+}
+function nodeQueryParam(nodeId) {
+  return nodeId ? '&nodeId=' + encodeURIComponent(nodeId) : '';
+}
+function setNodeIdOnBody(payload, nodeId) {
+  if (nodeId) payload.nodeId = nodeId;
+}
+function modelDisplayId(m) {
+  const id = safeText(m && m.id).trim();
+  const nd = safeText(m && (m.nodeId || m.node)).trim();
+  if (nd && nd !== 'local') return '[' + nd + '] ' + id;
+  return id;
+}
+function getNodeColor(nodeId) {
+  if (!nodeId || nodeId === 'local') return '';
+  var hash = 0;
+  for (var i = 0; i < nodeId.length; i++) {
+    hash = ((hash << 5) - hash) + nodeId.charCodeAt(i);
+    hash |= 0;
+  }
+  return ((Math.abs(hash) * 137.508) % 360).toFixed(1);
+}
+function nodeBadgeHtml(nodeId) {
+  if (!nodeId || nodeId === 'local') return '';
+  var hue = getNodeColor(nodeId);
+  return '<span class="node-badge" style="color:hsl(' + hue + ',65%,70%);background-color:hsl(' + hue + ',50%,12%);"><i class="fas fa-server"></i> ' + escapeHtml(nodeId) + '</span>';
+}
+function modelNodeId(state, selectEl) {
+  const opt = selectEl && selectEl.selectedOptions && selectEl.selectedOptions[0];
+  if (opt && opt.dataset && opt.dataset.nodeId) return opt.dataset.nodeId;
+  return effectiveNodeId(state);
+}
+function benchModelNodeId() {
+  if (bench.selectedModelId) {
+    const btn = E.bench.modelList ? E.bench.modelList.querySelector('button[data-model-id="' + bench.selectedModelId + '"]') : null;
+    if (btn && btn.dataset && btn.dataset.nodeId) return btn.dataset.nodeId;
+  }
+  return effectiveNodeId(bench);
+}
+function serverModelNodeId() {
+  if (server.selectedModelId) {
+    const btn = E.server.modelList ? E.server.modelList.querySelector('button[data-model-id="' + server.selectedModelId + '"]') : null;
+    if (btn && btn.dataset && btn.dataset.nodeId) return btn.dataset.nodeId;
+  }
+  return effectiveNodeId(server);
+}
 
 // == Model list rendering (shared between tabs) ==
 function matchesFilter(state, model) {
@@ -121,14 +167,26 @@ function updateModelsMeta(state, el, totalCount) {
 function updateActiveModelItem(state, listEl) {
   if (!listEl) return;
   listEl.querySelectorAll('button[data-model-id]').forEach(btn => {
-    btn.classList.toggle('active', !!state.selectedModelId && btn.dataset.modelId === state.selectedModelId);
+    const btnModelId = btn.dataset.modelId;
+    const btnNodeId = btn.dataset.nodeId || '';
+    const selectedId = state.selectedModelId;
+    if (!selectedId || btnModelId !== selectedId) { btn.classList.remove('active'); return; }
+    if (!state.selectedNodeId || state.selectedNodeId === 'all') { btn.classList.add('active'); return; }
+    btn.classList.toggle('active', btnNodeId === state.selectedNodeId || (!btnNodeId && state.selectedNodeId === 'local'));
   });
 }
-function renderModelList(state, listEl, metaEl) {
+function renderBenchModelList(state, listEl, metaEl) {
   if (!listEl) return;
   listEl.innerHTML = '';
   let list = (Array.isArray(state.allModels) ? state.allModels : []).slice();
   list = list.filter(m => matchesFilter(state, m));
+  if (state.selectedNodeId && state.selectedNodeId !== 'all') {
+    list = list.filter(m => {
+      const nd = safeText(m && (m.nodeId || m.node)).trim();
+      if (state.selectedNodeId === 'local') return !nd || nd === 'local';
+      return nd === state.selectedNodeId;
+    });
+  }
   list.sort((a, b) => getModelDisplayName(a).toLowerCase().localeCompare(getModelDisplayName(b).toLowerCase()));
   if (!list.length) {
     const el = document.createElement('div');
@@ -139,19 +197,64 @@ function renderModelList(state, listEl, metaEl) {
     return;
   }
   for (const m of list) {
-    const id = safeText(m && m.id).trim();
-    if (!id) continue;
-    const btn = document.createElement('button');
-    btn.type = 'button'; btn.className = 'model-menu-item'; btn.dataset.modelId = id;
-    if (state.loadedModelIds && state.loadedModelIds.has(id)) btn.classList.add('loaded');
-    const n = document.createElement('div'); n.className = 'name'; n.textContent = getModelDisplayName(m);
-    const t = document.createElement('div'); t.className = 'meta';
-    t.textContent = state.loadedModelIds && state.loadedModelIds.has(id) ? id + ' · 已加载' : id;
-    btn.appendChild(n); btn.appendChild(t);
-    listEl.appendChild(btn);
+    listEl.appendChild(buildModelItem(m, state));
   }
   updateModelsMeta(state, metaEl);
   updateActiveModelItem(state, listEl);
+}
+function renderServerModelList(state, listEl, metaEl) {
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  let list = (Array.isArray(state.allModels) ? state.allModels : []).slice();
+  list = list.filter(m => matchesFilter(state, m));
+  if (state.selectedNodeId && state.selectedNodeId !== 'all') {
+    list = list.filter(m => {
+      const nd = safeText(m && (m.nodeId || m.node)).trim();
+      if (state.selectedNodeId === 'local') return !nd || nd === 'local';
+      return nd === state.selectedNodeId;
+    });
+  }
+  list.sort((a, b) => getModelDisplayName(a).toLowerCase().localeCompare(getModelDisplayName(b).toLowerCase()));
+  if (!list.length) {
+    const el = document.createElement('div');
+    el.style.cssText = 'font-size:12px;color:var(--text-secondary);padding:8px;text-align:center;';
+    el.textContent = state.allModels.length ? '没有匹配的模型' : '暂无模型';
+    listEl.appendChild(el);
+    updateModelsMeta(state, metaEl);
+    return;
+  }
+  for (const m of list) {
+    listEl.appendChild(buildModelItem(m, state));
+  }
+  updateModelsMeta(state, metaEl);
+  updateActiveModelItem(state, listEl);
+}
+function buildModelItem(m, state) {
+  const id = safeText(m && m.id).trim();
+  const nd = safeText(m && (m.nodeId || m.node)).trim();
+  const isRemote = nd && nd !== 'local';
+  const hue = getNodeColor(nd);
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'model-menu-item'; btn.dataset.modelId = id;
+  if (isRemote) { btn.dataset.nodeId = nd; btn.style.borderLeft = '3px solid hsl(' + hue + ',65%,50%)'; }
+  if (state.loadedModelIds && state.loadedModelIds.has(id)) btn.classList.add('loaded');
+  const n = document.createElement('div'); n.className = 'name';
+  n.textContent = getModelDisplayName(m);
+  const t = document.createElement('div'); t.className = 'meta';
+  const statusText = state.loadedModelIds && state.loadedModelIds.has(id) ? '已加载' : '';
+  const parts = [];
+  if (isRemote) parts.push(nodeBadgeHtml(nd));
+  if (statusText) parts.push(escapeHtml(statusText));
+  t.innerHTML = parts.join(' ');
+  btn.appendChild(n);
+  if (parts.length) btn.appendChild(t);
+  if (m && m.size) {
+    const s = document.createElement('div'); s.className = 'meta';
+    s.style.color = 'var(--text-secondary)';
+    s.innerHTML = '<i class="fas fa-hdd"></i> ' + escapeHtml(formatFileSize(m.size));
+    btn.appendChild(s);
+  }
+  return btn;
 }
 
 // == Tab switching ==
@@ -166,12 +269,67 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
+// == Node filter ==
+function populateNodeFilter(state, selectEl) {
+  if (!selectEl) return;
+  const prevVal = selectEl.value || '';
+  selectEl.innerHTML = '';
+  const opts = [
+    { value: 'all', text: '全部节点' },
+    { value: 'local', text: '本机' }
+  ];
+  const seenNodeIds = new Set();
+  const all = Array.isArray(state.allModels) ? state.allModels : [];
+  for (const m of all) {
+    const nd = safeText(m && (m.nodeId || m.node)).trim();
+    if (nd && nd !== 'local' && !seenNodeIds.has(nd)) {
+      seenNodeIds.add(nd);
+      opts.push({ value: nd, text: nd });
+    }
+  }
+  for (const o of opts) {
+    const el = document.createElement('option');
+    el.value = o.value; el.textContent = o.text;
+    selectEl.appendChild(el);
+  }
+  if (prevVal && opts.some(o => o.value === prevVal)) selectEl.value = prevVal;
+  else selectEl.value = 'all';
+}
+function populateServerNodeFilter() {
+  const select = E.server.nodeFilter;
+  if (!select) return;
+  const prevVal = select.value || '';
+  select.innerHTML = '';
+  const opts = [
+    { value: 'all', text: '全部节点' },
+    { value: 'local', text: '本机' }
+  ];
+  const seenNodeIds = new Set();
+  const benchModels = Array.isArray(bench.allModels) ? bench.allModels : [];
+  const serverModels = Array.isArray(server.allModels) ? server.allModels : [];
+  for (const m of benchModels.concat(serverModels)) {
+    const nd = safeText(m && (m.nodeId || m.node)).trim();
+    if (nd && nd !== 'local' && !seenNodeIds.has(nd)) {
+      seenNodeIds.add(nd);
+      opts.push({ value: nd, text: nd });
+    }
+  }
+  for (const o of opts) {
+    const el = document.createElement('option');
+    el.value = o.value; el.textContent = o.text;
+    select.appendChild(el);
+  }
+  if (prevVal && opts.some(o => o.value === prevVal)) select.value = prevVal;
+  else select.value = 'all';
+}
+
 // == llama-bench tab ==
 async function initBenchTab() {
   if (!bench.allModels.length) await loadBenchAllModels();
-  populateBenchDropdown();
+  populateNodeFilter(bench, E.bench.nodeFilter);
+  renderBenchModelList(bench, E.bench.modelList, E.bench.modelsMeta);
   loadBenchHistory();
-  if (!bench.llamaPaths.length) loadBenchLlamaCppPaths();
+  if (!bench.llamaPaths.length) loadBenchLlamaCppPaths('');
   if (!bench.paramConfig.length) loadBenchParamConfig();
 }
 async function loadBenchAllModels() {
@@ -179,37 +337,19 @@ async function loadBenchAllModels() {
     const data = await fetchJson('/api/models/list', { method: 'GET' });
     if (data && data.success && Array.isArray(data.models)) {
       bench.allModels = data.models;
-      // Also check which are loaded
       try {
-        const ld = await fetchJson('/v1/models', { method: 'GET' });
-        const models = Array.isArray(ld && ld.data) ? ld.data : [];
+        const ld = await fetchJson('/api/models/loaded', { method: 'GET' });
+        const models = Array.isArray(ld && ld.models) ? ld.models : [];
         bench.loadedModels = models;
         bench.loadedModelIds = new Set(models.map(m => safeText(m && m.id).trim()).filter(Boolean));
       } catch(e) { /* ignore */ }
     }
   } catch(e) { bench.allModels = []; }
 }
-function populateBenchDropdown() {
-  E.bench.select.innerHTML = '';
-  const list = Array.isArray(bench.allModels) ? bench.allModels : [];
-  if (!list.length) {
-    const o = document.createElement('option'); o.value = ''; o.textContent = '暂无模型';
-    E.bench.select.appendChild(o); E.bench.select.disabled = true; return;
-  }
-  for (const m of list) {
-    const id = safeText(m && m.id).trim();
-    if (!id) continue;
-    const o = document.createElement('option'); o.value = id;
-    o.textContent = getModelDisplayName(m);
-    E.bench.select.appendChild(o);
-  }
-  E.bench.select.disabled = false;
-  if (bench.selectedModelId) E.bench.select.value = bench.selectedModelId;
-  else if (list.length) { bench.selectedModelId = safeText(list[0].id).trim(); E.bench.select.value = bench.selectedModelId; }
-}
-async function loadBenchLlamaCppPaths() {
+async function loadBenchLlamaCppPaths(nodeId) {
   try {
-    const data = await fetchJson('/api/llamacpp/list', { method: 'GET' });
+    const url = '/api/llamacpp/list' + (nodeId ? '?nodeId=' + encodeURIComponent(nodeId) : '');
+    const data = await fetchJson(url, { method: 'GET' });
     const items = (data && data.success && data.data) ? (data.data.items || []) : [];
     bench.llamaPaths = Array.isArray(items) ? items : [];
     populateBenchLlamaBinSelect();
@@ -242,7 +382,7 @@ async function loadBenchParamConfig() {
   try {
     const data = await fetchJson('/api/models/param/benchmark/list', { method: 'GET' });
     if (data && data.success && Array.isArray(data.params)) {
-      bench.paramConfig = data.params;
+      bench.paramConfig = data.params.filter(p => (p.fullName || '') !== '--main-gpu');
       if (window.I18N) {
         renderBenchParams();
       } else {
@@ -420,22 +560,54 @@ function updateBenchParamsCount() {
     total++;
     if (chk && chk.checked) enabled++;
   }
-  const text = '已设置 ' + enabled + ' / ' + total + ' 个参数';
-  if (E.bench.paramsStatus) E.bench.paramsStatus.textContent = text;
-  if (E.bench.paramsModalStatus) E.bench.paramsModalStatus.textContent = text;
+  const text = '参数设置 (' + enabled + '/' + total + ')';
+  if (E.bench.paramsBtn) E.bench.paramsBtn.textContent = text;
+  if (E.bench.paramsModalStatus) E.bench.paramsModalStatus.textContent = '已设置 ' + enabled + ' / ' + total + ' 个参数';
 }
 function openBenchParamsModal() {
   if (!bench.paramConfig.length) loadBenchParamConfig();
-  else updateBenchParamsCount();
+  else {
+    renderBenchParams();
+    restoreBenchParamCache();
+    updateBenchParamsCount();
+  }
   loadBenchParamsDevices();
   if (E.bench.paramsModal) E.bench.paramsModal.style.display = '';
+}
+function saveBenchParamCache() {
+  const configs = Array.isArray(bench.paramConfig) ? bench.paramConfig : [];
+  const cache = {};
+  for (const p of configs) {
+    const fn = (p.fullName || '').trim();
+    if (!fn) continue;
+    const fName = fieldNameFromParamConfig(p);
+    const enableChk = document.getElementById('param_enable_' + fName);
+    const ctrl = document.getElementById('param_' + fName);
+    if (ctrl) cache[fName] = { enabled: !!(enableChk && enableChk.checked), value: ctrl.value };
+  }
+  bench.paramCache = cache;
+}
+function restoreBenchParamCache() {
+  const cache = bench.paramCache;
+  if (!cache) return;
+  for (const [fName, saved] of Object.entries(cache)) {
+    const enableChk = document.getElementById('param_enable_' + fName);
+    if (enableChk) enableChk.checked = !!saved.enabled;
+    const ctrl = document.getElementById('param_' + fName);
+    if (ctrl && saved.value != null) ctrl.value = saved.value;
+  }
+}
+function confirmBenchParams() {
+  saveBenchParamCache();
+  updateBenchParamsCount();
+  if (E.bench.paramsModal) E.bench.paramsModal.style.display = 'none';
 }
 function closeBenchParamsModal() {
   updateBenchParamsCount();
   if (E.bench.paramsModal) E.bench.paramsModal.style.display = 'none';
 }
 function resetBenchParams() {
-  // Re-render with defaults
+  bench.paramCache = null;
   renderBenchParams();
 }
 function buildBenchCmd() {
@@ -461,10 +633,19 @@ function buildBenchCmd() {
 }
 function buildBenchDeviceArg() {
   const checks = E.bench.paramsDeviceList ? E.bench.paramsDeviceList.querySelectorAll('input[type=checkbox]') : [];
-  const enabled = []; const disabled = [];
-  checks.forEach(chk => { if (chk.checked) enabled.push(chk.dataset.deviceId); else disabled.push(chk.dataset.deviceId); });
-  if (!checks.length || !disabled.length) return '';
-  return '-dev ' + enabled.join(',');
+  const enabled = [];
+  checks.forEach((chk, i) => { if (chk.checked) enabled.push(parseDeviceName(i)); });
+  const parts = [];
+  if (checks.length && enabled.length < checks.length) parts.push('-dev ' + enabled.join('/'));
+  const mg = getBenchMainGpu();
+  if (mg >= 0) parts.push('--main-gpu ' + mg);
+  return parts.join(' ');
+}
+function parseDeviceName(idx) {
+  const d = Array.isArray(bench.devices) ? bench.devices[idx] : null;
+  if (d == null) return '';
+  const raw = typeof d === 'string' ? d : safeText(d.name || d.brand || d.id || d).trim();
+  return raw.split(':')[0].trim();
 }
 async function loadBenchParamsDevices() {
   const list = E.bench.paramsDeviceList;
@@ -476,7 +657,8 @@ async function loadBenchParamsDevices() {
   }
   list.innerHTML = '<div class="device-placeholder">加载中…</div>';
   try {
-    const url = '/api/model/device/list?llamaBinPath=' + encodeURIComponent(llamaBinPath);
+    const nodeId = effectiveNodeId(bench);
+    const url = '/api/model/device/list?llamaBinPath=' + encodeURIComponent(llamaBinPath) + nodeQueryParam(nodeId);
     const data = await fetchJson(url, { method: 'GET' });
     if (data && data.success && data.data && Array.isArray(data.data.devices)) {
       bench.devices = data.data.devices;
@@ -490,32 +672,70 @@ async function loadBenchParamsDevices() {
     bench.devices = [];
   }
 }
+function deviceLabel(d) {
+  if (d == null) return '';
+  return typeof d === 'string' ? d.trim() : safeText(d.name || d.brand || d.id || d).trim();
+}
 function renderBenchParamsDevices() {
   const list = E.bench.paramsDeviceList;
   if (!list) return;
   const devices = bench.devices;
   if (!devices.length) {
     list.innerHTML = '<div class="device-placeholder">未发现可用设备</div>';
+    renderBenchMainGpuSelect();
     return;
   }
   let html = '';
-  for (const d of devices) {
-    const id = safeText(d && d.id).trim() || safeText(d).trim();
-    if (!id) continue;
-    const label = safeText(d.name || d.brand || id);
-    html += '<label><input type="checkbox" checked data-device-id="' + escapeHtml(id) + '"><span class="device-label-text">' + escapeHtml(label) + '</span></label>';
+  for (let i = 0; i < devices.length; i++) {
+    const label = escapeHtml(deviceLabel(devices[i]));
+    html += '<label><input type="checkbox" checked data-device-index="' + i + '"><span class="device-label-text">' + label + '</span></label>';
   }
   list.innerHTML = html;
+  list.querySelectorAll('input[type=checkbox]').forEach(chk => {
+    chk.addEventListener('change', () => renderBenchMainGpuSelect());
+  });
+  renderBenchMainGpuSelect();
+}
+function getCheckedDeviceIndices() {
+  const checks = E.bench.paramsDeviceList ? E.bench.paramsDeviceList.querySelectorAll('input[type=checkbox]') : [];
+  const indices = [];
+  checks.forEach((chk, i) => { if (chk.checked) indices.push(i); });
+  return indices;
+}
+function renderBenchMainGpuSelect() {
+  const select = E.bench.mainGpuSelect;
+  if (!select) return;
+  const prevVal = select.value;
+  const devices = bench.devices;
+  const checked = getCheckedDeviceIndices();
+  const options = ['<option value="-1">默认</option>'];
+  if (Array.isArray(devices) && checked.length > 0) {
+    for (let pos = 0; pos < checked.length; pos++) {
+      const idx = checked[pos];
+      if (idx >= 0 && idx < devices.length) {
+        options.push('<option value="' + pos + '">' + escapeHtml(deviceLabel(devices[idx])) + '</option>');
+      }
+    }
+  }
+  select.innerHTML = options.join('');
+  const prev = parseInt(prevVal, 10);
+  if (Number.isFinite(prev) && prev >= 0 && prev < checked.length)
+    select.value = prevVal;
+}
+function getBenchMainGpu() {
+  const select = E.bench.mainGpuSelect;
+  if (!select) return -1;
+  const n = parseInt(select.value, 10);
+  return Number.isFinite(n) && n >= 0 ? n : -1;
 }
 async function runBench() {
   if (bench.isRunning) { cancelBench(); return; }
-  const modelId = (E.bench.select.value || '').trim();
+  const modelId = (bench.selectedModelId || '').trim();
   if (!modelId) { setBenchMeta('请选择模型', true); return; }
   bench.isRunning = true;
   bench.abortController = new AbortController();
-  E.bench.runBtn.textContent = '取消'; E.bench.runBtn.classList.add('btn-danger');
-  E.bench.progress.style.display = 'flex'; E.bench.progressBar.value = 0;
-  E.bench.statusText.textContent = '执行中…';
+  E.bench.runBtn.textContent = '运行中…';
+  E.bench.runBtn.classList.add('btn-danger');
   try {
     const cmd = buildBenchCmd();
     const devArg = buildBenchDeviceArg();
@@ -527,16 +747,13 @@ async function runBench() {
     }
     const payload = { modelId, cmd: fullCmd };
     if (llamaBinPath) payload.llamaBinPath = llamaBinPath;
+    setNodeIdOnBody(payload, benchModelNodeId());
     const data = await fetchJson('/api/models/benchmark', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload), signal: bench.abortController.signal
     });
-    E.bench.progressBar.value = 100;
     if (data && data.success) {
-      E.bench.statusText.textContent = '完成';
-      // Reload history — the API returns the saved file name
       loadBenchHistory().then(() => {
-        // Auto-select the newly created result
         if (data.data && data.data.savedPath) {
           const savedName = data.data.savedPath.replace(/\\/g, '/').split('/').pop();
           if (savedName && bench.historyFiles.find(f => f.name === savedName)) {
@@ -547,16 +764,15 @@ async function runBench() {
         }
       });
     } else {
-      E.bench.statusText.textContent = '失败';
       setBenchMeta((data && data.error) || '失败');
     }
   } catch(e) {
-    if (e && e.name === 'AbortError') E.bench.statusText.textContent = '已取消';
-    else { E.bench.statusText.textContent = '失败'; setBenchMeta((e && e.message) || '请求失败'); }
+    if (e && e.name === 'AbortError') { setBenchMeta('已取消', true); }
+    else { setBenchMeta((e && e.message) || '请求失败'); }
   } finally {
     bench.isRunning = false; bench.abortController = null;
-    E.bench.runBtn.textContent = '运行'; E.bench.runBtn.classList.remove('btn-danger');
-    setTimeout(() => { E.bench.progress.style.display = 'none'; }, 2000);
+    E.bench.runBtn.textContent = '运行';
+    E.bench.runBtn.classList.remove('btn-danger');
   }
 }
 async function loadBenchHistory() {
@@ -568,7 +784,8 @@ async function loadBenchHistory() {
   }
   setBenchMeta('加载记录中…', true);
   try {
-    const data = await fetchJson('/api/models/benchmark/list?modelId=' + encodeURIComponent(id), { method: 'GET' });
+    const nodeId = benchModelNodeId();
+    const data = await fetchJson('/api/models/benchmark/list?modelId=' + encodeURIComponent(id) + nodeQueryParam(nodeId), { method: 'GET' });
     if (data && data.success && data.data && Array.isArray(data.data.files)) {
       bench.historyFiles = data.data.files;
     } else {
@@ -629,7 +846,8 @@ async function loadBenchHistoryFile(fileName) {
   if (!fileName) { bench.selectedFileData = null; showBenchOutput(); return; }
   setBenchMeta('加载中…', true);
   try {
-    const data = await fetchJson('/api/models/benchmark/get?fileName=' + encodeURIComponent(fileName), { method: 'GET' });
+    const nodeId = benchModelNodeId();
+    const data = await fetchJson('/api/models/benchmark/get?fileName=' + encodeURIComponent(fileName) + nodeQueryParam(nodeId), { method: 'GET' });
     if (data && data.success && data.data) {
       bench.selectedFileData = data.data;
     } else {
@@ -659,7 +877,8 @@ function showBenchOutput() {
 async function deleteBenchHistoryFile(fileName) {
   if (!fileName || !window.confirm('确定删除该测试记录吗？')) return;
   try {
-    const data = await fetchJson('/api/models/benchmark/delete?fileName=' + encodeURIComponent(fileName), { method: 'POST' });
+    const nodeId = benchModelNodeId();
+    const data = await fetchJson('/api/models/benchmark/delete?fileName=' + encodeURIComponent(fileName) + nodeQueryParam(nodeId), { method: 'POST' });
     if (data && data.success) {
       if (fileName === bench.selectedFileName) {
         bench.selectedFileName = '';
@@ -693,7 +912,8 @@ function formatFileSize(bytes) {
   if (bytes == null) return '';
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1048576).toFixed(1) + ' MB';
+  if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+  return (bytes / 1073741824).toFixed(2) + ' GB';
 }
 let _benchMetaTimer = null;
 function setBenchMeta(msg, isTransient) {
@@ -714,7 +934,9 @@ function benchSelectModel(id) {
   bench.selectedModelId = id;
   bench.selectedFileName = '';
   bench.selectedFileData = null;
-  if (E.bench.select) E.bench.select.value = id;
+  updateActiveModelItem(bench, E.bench.modelList);
+  const nd = benchModelNodeId();
+  loadBenchLlamaCppPaths(nd);
   if (E.bench.selText) {
     E.bench.selText.style.display = id ? '' : 'none';
     if (id) E.bench.selText.textContent = '模型：' + id;
@@ -727,60 +949,32 @@ function benchSelectModel(id) {
 // == llama-server tab ==
 async function initServerTab() {
   await loadServerModels();
-  renderModelList(server, E.server.modelList, E.server.modelsMeta);
-  populateServerDropdown();
+  populateServerNodeFilter();
+  renderServerModelList(server, E.server.modelList, E.server.modelsMeta);
   if (server.selectedModelId) loadServerRecords('replace');
 }
 async function loadServerModels() {
   try {
-    const data = await fetchJson('/v1/models', { method: 'GET' });
-    const models = Array.isArray(data && data.data) ? data.data : [];
-    server.loadedModels = models;
-    server.loadedModelIds = new Set(models.map(m => safeText(m && m.id).trim()).filter(Boolean));
+    const data = await fetchJson('/api/models/list', { method: 'GET' });
+    const models = Array.isArray(data && data.models) ? data.models : [];
     server.allModels = models;
+    try {
+      const ld = await fetchJson('/api/models/loaded', { method: 'GET' });
+      const loaded = Array.isArray(ld && ld.models) ? ld.models : [];
+      server.loadedModels = loaded;
+      server.loadedModelIds = new Set(loaded.map(m => safeText(m && m.id).trim()).filter(Boolean));
+    } catch(e) { server.loadedModels = []; server.loadedModelIds = new Set(); }
   } catch(e) { server.loadedModels = []; server.loadedModelIds = new Set(); server.allModels = []; }
-}
-function populateServerDropdown() {
-  E.server.select.innerHTML = '';
-  const list = Array.isArray(server.allModels) ? server.allModels : [];
-  if (!list.length) {
-    const o = document.createElement('option'); o.value = ''; o.textContent = '暂无已加载模型';
-    E.server.select.appendChild(o); E.server.select.disabled = true; return;
-  }
-  for (const m of list) {
-    const id = m.id || '';
-    const o = document.createElement('option'); o.value = id;
-    o.textContent = id + (m.runtimeCtx != null ? ' (ctx:' + m.runtimeCtx + ')' : '');
-    if (m.runtimeCtx != null) o.dataset.runtimeCtx = m.runtimeCtx;
-    E.server.select.appendChild(o);
-  }
-  E.server.select.disabled = false;
-  if (server.selectedModelId) E.server.select.value = server.selectedModelId;
-  else if (list.length) { server.selectedModelId = list[0].id; E.server.select.value = list[0].id; }
-  validateServerTokens();
-}
-function readServerCtx() {
-  const opt = E.server.select.selectedOptions && E.server.select.selectedOptions[0];
-  if (!opt) return null;
-  const raw = opt.dataset ? opt.dataset.runtimeCtx : null;
-  const n = raw == null ? NaN : Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
 }
 function validateServerTokens() {
   const pt = parseInt(E.server.promptTokens.value, 10);
   const mt = parseInt(E.server.maxTokens.value, 10);
-  const ctx = readServerCtx();
-  if (!ctx) return true;
   if (!Number.isFinite(pt) || pt <= 0 || !Number.isFinite(mt) || mt <= 0) return false;
-  if (pt + mt > ctx) {
-    E.server.status.textContent = '提示词长度 + 输出最大token 不能超过模型上下文长度 (' + ctx + ')';
-    return false;
-  }
   return true;
 }
 async function runServer() {
   if (server.isRunning) { cancelServer(); return; }
-  const modelId = (E.server.select.value || '').trim();
+  const modelId = (server.selectedModelId || '').trim();
   const promptTokens = parseInt(E.server.promptTokens.value, 10);
   const maxTokens = parseInt(E.server.maxTokens.value, 10);
   const concurrencyRaw = parseInt(E.server.concurrency.value, 10);
@@ -793,41 +987,33 @@ async function runServer() {
   if (!validateServerTokens()) return;
   server.isRunning = true;
   server.abortController = new AbortController();
-  E.server.runBtn.textContent = '取消'; E.server.runBtn.classList.add('btn-danger');
-  E.server.progress.style.display = 'flex'; E.server.progressBar.value = 0;
-  let done = 0; const total = concurrency;
-  E.server.statusText.textContent = concurrency > 1 ? '执行中… (0/' + total + ')' : '执行中…';
+  E.server.runBtn.textContent = '运行中…';
+  E.server.runBtn.classList.add('btn-danger');
   try {
     const payload = { modelId, promptTokens, maxTokens };
+    setNodeIdOnBody(payload, serverModelNodeId());
     const requestOnce = () => fetchJson('/api/v2/models/benchmark', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload), signal: server.abortController.signal
     });
     if (concurrency === 1) {
       const data = await requestOnce();
-      E.server.progressBar.value = 100;
-      E.server.statusText.textContent = data.success ? '完成' : ((data && data.error) || '失败');
       if (data && data.success) {
         saveHwProfile(server, data.data, modelId);
         loadServerRecords('replace');
       }
       return;
     }
-    const tasks = Array.from({ length: concurrency }, () => requestOnce().then(
-      d => { done++; E.server.progressBar.value = Math.round(done/total*100); E.server.statusText.textContent = '执行中… (' + done + '/' + total + ')'; return d; },
-      e => { done++; E.server.progressBar.value = Math.round(done/total*100); E.server.statusText.textContent = '执行中… (' + done + '/' + total + ')'; throw e; }
-    ));
+    const tasks = Array.from({ length: concurrency }, () => requestOnce());
     const results = await Promise.allSettled(tasks);
     if (server.abortController && server.abortController.signal && server.abortController.signal.aborted) {
-      E.server.statusText.textContent = '已取消'; return;
+      return;
     }
     let ok = 0, fail = 0; const successData = [];
     for (const r of results) {
       if (r.status === 'fulfilled' && r.value && r.value.success) { ok++; successData.push(r.value.data); saveHwProfile(server, r.value.data, modelId); }
       else fail++;
     }
-    E.server.progressBar.value = 100;
-    E.server.statusText.textContent = fail === 0 ? '完成' : '完成 ' + ok + '/' + total + '，失败 ' + fail;
     if (ok > 0) {
       if (successData.length > 1) {
         const stats = computeStats(successData);
@@ -837,12 +1023,12 @@ async function runServer() {
       loadServerRecords('replace');
     }
   } catch(e) {
-    if (e && e.name === 'AbortError') { E.server.statusText.textContent = '已取消'; return; }
-    E.server.statusText.textContent = '失败'; E.server.status.textContent = (e && e.message) || '请求失败';
+    if (e && e.name === 'AbortError') { E.server.status.textContent = '已取消'; return; }
+    E.server.status.textContent = (e && e.message) || '请求失败';
   } finally {
     server.isRunning = false; server.abortController = null;
-    E.server.runBtn.textContent = '运行'; E.server.runBtn.classList.remove('btn-danger');
-    setTimeout(() => { E.server.progress.style.display = 'none'; }, 2000);
+    E.server.runBtn.textContent = '运行';
+    E.server.runBtn.classList.remove('btn-danger');
   }
 }
 function computeStats(results) {
@@ -889,20 +1075,29 @@ function hwFallback(record, state) {
   if (!safeText(out.cmd).trim() && safeText(profile.cmd).trim()) out.cmd = profile.cmd;
   return out;
 }
+function clearServerChart() {
+  if (E.server.chartEmpty) E.server.chartEmpty.style.display = 'flex';
+  if (E.server.chartCanvas) {
+    const ctx = E.server.chartCanvas.getContext('2d');
+    ctx.clearRect(0, 0, E.server.chartCanvas.width, E.server.chartCanvas.height);
+  }
+}
 async function loadServerRecords(mode) {
   const id = (server.selectedModelId || '').trim();
-  if (!id) { clearResultRows(E.server.resultBody, E.server.emptyRow); return; }
+  if (!id) { clearResultRows(E.server.resultBody, E.server.emptyRow); clearServerChart(); return; }
   E.server.status.textContent = '加载记录中…';
   try {
-    const data = await fetchJson('/api/v2/models/benchmark/get?modelId=' + encodeURIComponent(id), { method: 'GET' });
+    const nodeId = serverModelNodeId();
+    const data = await fetchJson('/api/v2/models/benchmark/get?modelId=' + encodeURIComponent(id) + nodeQueryParam(nodeId), { method: 'GET' });
     if (!data || data.success !== true) {
-      if (mode === 'replace') clearResultRows(E.server.resultBody, E.server.emptyRow);
-      E.server.status.textContent = (data && data.error) || '暂无记录';
+      if (mode === 'replace') { clearResultRows(E.server.resultBody, E.server.emptyRow); clearServerChart(); }
+      const err = data && data.error ? data.error : '';
+      E.server.status.textContent = err === '文件不存在' ? '无任何测试记录' : (err || '暂无记录');
       return;
     }
     const records = data && data.data && Array.isArray(data.data.records) ? data.data.records : [];
     if (!records.length) {
-      if (mode === 'replace') clearResultRows(E.server.resultBody, E.server.emptyRow);
+      if (mode === 'replace') { clearResultRows(E.server.resultBody, E.server.emptyRow); clearServerChart(); }
       E.server.status.textContent = '暂无记录';
       return;
     }
@@ -921,14 +1116,17 @@ async function loadServerRecords(mode) {
       E.server.status.textContent = '已加载 ' + sorted.length + ' 条记录';
     }
   } catch(e) {
-    if (mode === 'replace') clearResultRows(E.server.resultBody, E.server.emptyRow);
+    if (mode === 'replace') { clearResultRows(E.server.resultBody, E.server.emptyRow); clearServerChart(); }
     E.server.status.textContent = e.message || '记录加载失败';
   }
 }
 function serverSelectModel(id) {
   server.selectedModelId = id;
-  if (E.server.select) E.server.select.value = id;
   updateActiveModelItem(server, E.server.modelList);
+  const isLoaded = id && server.loadedModelIds.has(id);
+  E.server.runBtn.disabled = !isLoaded;
+  E.server.runBtn.title = isLoaded ? '' : '模型未加载，无法运行测试';
+  const nd = serverModelNodeId();
   E.server.selText.style.display = id ? '' : 'none';
   if (id) E.server.selText.textContent = '模型：' + id;
   loadServerRecords('replace');
@@ -936,7 +1134,7 @@ function serverSelectModel(id) {
 function cancelServer() {
   if (!server.isRunning) return;
   if (server.abortController) server.abortController.abort();
-  E.server.statusText.textContent = '取消中…';
+  E.server.runBtn.textContent = '取消中…';
 }
 async function deleteServerRecord(record, btn) {
   const modelId = safeText(record.modelId || server.selectedModelId).trim();
@@ -946,9 +1144,12 @@ async function deleteServerRecord(record, btn) {
   if (btn) btn.disabled = true;
   E.server.status.textContent = '删除中…';
   try {
+    const nodeId = serverModelNodeId();
+    const payload = { modelId, lineNumber };
+    setNodeIdOnBody(payload, nodeId);
     const data = await fetchJson('/api/v2/models/benchmark/delete', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ modelId, lineNumber })
+      body: JSON.stringify(payload)
     });
     if (!data || data.success !== true) throw new Error((data && data.error) || '删除失败');
     loadServerRecords('replace');
@@ -966,7 +1167,7 @@ function serverExport(format) {
 function clearResultRows(bodyEl, emptyRow) {
   if (!bodyEl) return;
   bodyEl.innerHTML = '';
-  if (emptyRow) bodyEl.appendChild(emptyRow.cloneNode(true));
+  if (emptyRow) { const clone = emptyRow.cloneNode(true); clone.id = emptyRow.id; bodyEl.appendChild(clone); }
 }
 function speedClass(value, isPrefill) {
   const n = Number(value);
@@ -1021,12 +1222,12 @@ function createResultRow(record, deleteFn) {
 }
 function appendResultRow(record, bodyEl, emptyRow) {
   if (!bodyEl) return;
-  const empty = bodyEl.querySelector('tr');
-  if (empty && (!empty.id || empty.id.includes('Empty') || empty.id.includes('empty'))) empty.remove();
-  const tr = createResultRow(record, record.mode === 'llama-server' ? deleteServerRecord : null);
+  const empty = bodyEl.querySelector('tr[id]');
+  if (empty && empty.id && empty.id.includes('Empty')) empty.remove();
+  const tr = createResultRow(record, deleteServerRecord);
   bodyEl.appendChild(tr);
   if (!record.isStats) {
-    const merged = hwFallback(record, record.mode === 'llama-server' ? server : bench);
+    const merged = hwFallback(record, server);
     const details = [];
     const add = txt => { const r = document.createElement('tr'); r.className = 'record-detail'; const d = document.createElement('td'); d.colSpan = 7; d.textContent = txt; r.appendChild(d); details.push(r); };
     const cpuRam = (() => { const c = safeText(merged && merged.cpu).trim(); const r = safeText(merged && merged.ram).trim(); if (c && r) return c + ' / ' + r + 'GB'; if (c) return c; if (r) return r + 'GB'; return ''; })();
@@ -1044,8 +1245,8 @@ function appendResultRow(record, bodyEl, emptyRow) {
 }
 function prependStatsRow(stats, bodyEl, emptyRow) {
   if (!bodyEl) return;
-  const empty = bodyEl.querySelector('tr');
-  if (empty && (!empty.id || empty.id.includes('Empty') || empty.id.includes('empty'))) empty.remove();
+  const empty = bodyEl.querySelector('tr[id]');
+  if (empty && empty.id && empty.id.includes('Empty')) empty.remove();
   const tr = createResultRow(stats, null);
   const first = bodyEl.firstChild;
   if (first) bodyEl.insertBefore(tr, first);
@@ -1053,6 +1254,7 @@ function prependStatsRow(stats, bodyEl, emptyRow) {
 }
 
 // == Shared: chart ==
+function chartVal(v) { const n = Number(v) || 0; return n >= 100000 ? 0 : n; }
 function renderChart(canvasEl, emptyEl, wrapEl, records) {
   if (!canvasEl || !emptyEl || !wrapEl) return;
   const data = records.filter(r => !r.isStats && r.timings && r.timings.prompt_per_second != null);
@@ -1073,7 +1275,7 @@ function renderChart(canvasEl, emptyEl, wrapEl, records) {
   const gap = barW * 0.5;
   const gw = barW * 2 + gap;
   let maxV = 0;
-  data.slice(0, count).forEach(d => { const p = Number(d.timings.prompt_per_second) || 0; const g = Number(d.timings.predicted_per_second) || 0; maxV = Math.max(maxV, p, g); });
+  data.slice(0, count).forEach(d => { const p = chartVal(d.timings.prompt_per_second); const g = chartVal(d.timings.predicted_per_second); maxV = Math.max(maxV, p, g); });
   maxV = Math.ceil(Math.max(maxV * 1.15, 10));
   const style = getComputedStyle(wrapEl);
   const tc = style.getPropertyValue('--text-secondary').trim() || '#999';
@@ -1093,8 +1295,8 @@ function renderChart(canvasEl, emptyEl, wrapEl, records) {
   const colors = ['rgba(99,102,241,0.8)', 'rgba(16,185,129,0.8)'];
   for (let i = 0; i < count; i++) {
     const dp = data[i];
-    const pf = Number(dp.timings.prompt_per_second) || 0;
-    const dg = Number(dp.timings.predicted_per_second) || 0;
+    const pf = chartVal(dp.timings.prompt_per_second);
+    const dg = chartVal(dp.timings.predicted_per_second);
     const x = pad.left + (cw / count) * i + (cw / count - gw) / 2;
     ctx.fillStyle = colors[0];
     ctx.fillRect(x, pad.top + ch - (pf / maxV) * ch, barW, (pf / maxV) * ch);
@@ -1154,29 +1356,44 @@ function doExport(records, format, modelId, statusEl) {
 function cancelBench() {
   if (!bench.isRunning) return;
   if (bench.abortController) bench.abortController.abort();
-  E.bench.statusText.textContent = '取消中…';
+  E.bench.runBtn.textContent = '取消中…';
 }
 
 // == Event listeners ==
 // llama-bench
 E.bench.runBtn.addEventListener('click', runBench);
-E.bench.select.addEventListener('change', () => benchSelectModel(E.bench.select.value));
+E.bench.modelList.addEventListener('click', e => {
+  const t = e.target.closest('button[data-model-id]'); if (t) benchSelectModel(t.dataset.modelId);
+});
+E.bench.searchInput.addEventListener('input', e => { bench.filterText = (e.target.value || '').trim(); renderBenchModelList(bench, E.bench.modelList, E.bench.modelsMeta); });
+E.bench.nodeFilter.addEventListener('change', () => {
+  bench.selectedNodeId = E.bench.nodeFilter.value;
+  loadBenchLlamaCppPaths(effectiveNodeId(bench));
+  renderBenchModelList(bench, E.bench.modelList, E.bench.modelsMeta);
+  if (bench.selectedModelId) { benchSelectModel(bench.selectedModelId); }
+});
 if (E.bench.copyBtn) E.bench.copyBtn.addEventListener('click', benchCopyOutput);
 if (E.bench.exportBtn) E.bench.exportBtn.addEventListener('click', benchExportText);
 if (E.bench.paramsBtn) E.bench.paramsBtn.addEventListener('click', openBenchParamsModal);
-if (E.bench.paramsConfirmBtn) E.bench.paramsConfirmBtn.addEventListener('click', closeBenchParamsModal);
+if (E.bench.paramsConfirmBtn) E.bench.paramsConfirmBtn.addEventListener('click', confirmBenchParams);
 if (E.bench.paramsCloseBtn) E.bench.paramsCloseBtn.addEventListener('click', closeBenchParamsModal);
 if (E.bench.paramsResetBtn) E.bench.paramsResetBtn.addEventListener('click', resetBenchParams);
 if (E.bench.paramsModal) E.bench.paramsModal.addEventListener('click', e => { if (e.target === E.bench.paramsModal) closeBenchParamsModal(); });
 
 // llama-server
 E.server.runBtn.addEventListener('click', runServer);
-E.server.select.addEventListener('change', () => { validateServerTokens(); serverSelectModel(E.server.select.value); });
 E.server.promptTokens.addEventListener('input', validateServerTokens);
 E.server.maxTokens.addEventListener('input', validateServerTokens);
-E.server.searchInput.addEventListener('input', e => { server.filterText = (e.target.value || '').trim(); renderModelList(server, E.server.modelList, E.server.modelsMeta); });
+E.server.searchInput.addEventListener('input', e => { server.filterText = (e.target.value || '').trim(); renderServerModelList(server, E.server.modelList, E.server.modelsMeta); });
+E.server.nodeFilter.addEventListener('change', () => {
+  server.selectedNodeId = E.server.nodeFilter.value;
+  renderServerModelList(server, E.server.modelList, E.server.modelsMeta);
+  if (server.selectedModelId) { serverSelectModel(server.selectedModelId); }
+});
 E.server.modelList.addEventListener('click', e => {
-  const t = e.target.closest('button[data-model-id]'); if (t) serverSelectModel(t.dataset.modelId);
+  const t = e.target.closest('button[data-model-id]'); if (t) {
+    serverSelectModel(t.dataset.modelId);
+  }
 });
 E.server.exportBtns.forEach(btn => {
   btn.addEventListener('click', () => serverExport(btn.dataset.format));
@@ -1188,5 +1405,5 @@ window.addEventListener('resize', () => {
 
 // == Init ==
 document.addEventListener('DOMContentLoaded', () => {
-  initBenchTab();
+  if (!document.getElementById('sidebar')) initServerTab();
 });

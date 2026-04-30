@@ -235,7 +235,7 @@ public class NodeManager {
         final int statusCode;
         final String body;
 
-        HttpResult(int statusCode, String body) {
+        public HttpResult(int statusCode, String body) {
             this.statusCode = statusCode;
             this.body = body;
         }
@@ -470,7 +470,7 @@ public class NodeManager {
 		}
 	}
 
-    private String readStream(java.io.InputStream stream) throws IOException {
+    public static String readStream(java.io.InputStream stream) throws IOException {
         if (stream == null) return "";
         try (BufferedReader br = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
             StringBuilder sb = new StringBuilder();

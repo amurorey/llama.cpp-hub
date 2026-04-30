@@ -190,9 +190,6 @@ public class BenchmarkService {
 			}
 
 			return data;
-		} catch (RuntimeException e) {
-			logger.info("执行模型基准测试V2时发生错误", e);
-			throw e;
 		} catch (Exception e) {
 			logger.info("执行模型基准测试V2时发生错误", e);
 			throw new RuntimeException("执行模型基准测试失败: " + e.getMessage(), e);
