@@ -188,7 +188,7 @@
     "fullName": "--threads",
     "abbreviation": "-t",
     "type": "STRING",
-    "defaultValue": "",
+    "defaultValue": "4",
     "defaultEnabled": false,
     "description": "param.benchmark.threads.desc",
     "sort": 18,

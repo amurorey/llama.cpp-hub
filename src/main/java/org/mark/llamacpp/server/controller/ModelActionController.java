@@ -7,6 +7,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.text.SimpleDateFormat;
@@ -1187,13 +1188,15 @@ public class ModelActionController implements BaseController {
 			String query = request.uri();
 			Map<String, String> params = ParamTool.getQueryParam(query);
 			String nodeId = params.get("nodeId");
+			String fileName = params.get("fileName");
 			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
-				this.proxyGetRemote(ctx, request, nodeId, "api/models/benchmark/delete");
+				JsonObject body = new JsonObject();
+				body.addProperty("fileName", fileName);
+				String remotePath = "api/models/benchmark/delete?fileName=" + java.net.URLEncoder.encode(fileName != null ? fileName : "", "UTF-8");
+				NodeManager.HttpResult result = callRemoteApiTracked(ctx, nodeId, "POST", remotePath, body);
+				writeRemoteResult(ctx, result);
 				return;
 			}
-			String fileName = null;
-			
-			fileName = params.get("fileName");
 			
 			if (fileName == null || fileName.trim().isEmpty()) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需的fileName参数"));

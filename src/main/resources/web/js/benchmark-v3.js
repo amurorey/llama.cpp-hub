@@ -1,3 +1,4 @@
+(function() {
 // == Shared state objects (completely independent) ==
 const bench = {
   allModels: [], loadedModels: [], loadedModelIds: new Set(),
@@ -383,19 +384,23 @@ async function loadBenchParamConfig() {
     const data = await fetchJson('/api/models/param/benchmark/list', { method: 'GET' });
     if (data && data.success && Array.isArray(data.params)) {
       bench.paramConfig = data.params.filter(p => (p.fullName || '') !== '--main-gpu');
-      if (window.I18N) {
-        renderBenchParams();
-      } else {
-        const onReady = function() {
-          window.removeEventListener('i18n:ready', onReady);
-          renderBenchParams();
-        };
-        window.addEventListener('i18n:ready', onReady);
-      }
+      renderBenchParamsOnce();
     }
   } catch(e) {
     if (E.bench.paramsContainer) E.bench.paramsContainer.innerHTML = '<div style="font-size:14px;color:var(--text-secondary);padding:24px;text-align:center;">参数加载失败</div>';
   }
+}
+function renderBenchParamsOnce() {
+  if (bench._paramsRendered) return;
+  renderBenchParams();
+  bench._paramsRendered = true;
+}
+async function loadBenchParamConfigAndShow() {
+  await loadBenchParamConfig();
+  restoreBenchParamCache();
+  updateBenchParamsCount();
+  loadBenchParamsDevices();
+  if (E.bench.paramsModal) E.bench.paramsModal.style.display = 'flex';
 }
 function fieldNameFromParamConfig(p) {
   const fn = (p.fullName || '').trim();
@@ -440,8 +445,8 @@ function renderParamField(p) {
   if (!fullName && !abbr) return '';
 
   const fieldName = fieldNameFromParamConfig(p);
-  const fieldId = 'param_' + fieldName;
-  const enableId = 'param_enable_' + fieldName;
+  const fieldId = 'param_bench_' + fieldName;
+  const enableId = 'param_enable_bench_' + fieldName;
   const displayName = t(p.name, fullName || abbr || p.name);
   const description = t(p.description, '');
   const defaultValue = p.defaultValue || '';
@@ -556,7 +561,7 @@ function updateBenchParamsCount() {
     const fn = (p.fullName || '').trim();
     if (!fn) continue;
     const fName = fieldNameFromParamConfig(p);
-    const chk = document.getElementById('param_enable_' + fName);
+    const chk = document.getElementById('param_enable_bench_' + fName);
     total++;
     if (chk && chk.checked) enabled++;
   }
@@ -565,14 +570,18 @@ function updateBenchParamsCount() {
   if (E.bench.paramsModalStatus) E.bench.paramsModalStatus.textContent = '已设置 ' + enabled + ' / ' + total + ' 个参数';
 }
 function openBenchParamsModal() {
-  if (!bench.paramConfig.length) loadBenchParamConfig();
-  else {
-    renderBenchParams();
-    restoreBenchParamCache();
-    updateBenchParamsCount();
-  }
+  if (!bench.paramConfig.length) { loadBenchParamConfigAndShow(); return; }
+  renderBenchParamsOnce();
+  restoreBenchParamCache();
+  updateBenchParamsCount();
   loadBenchParamsDevices();
-  if (E.bench.paramsModal) E.bench.paramsModal.style.display = '';
+  if (E.bench.paramsModal) E.bench.paramsModal.style.display = 'flex';
+}
+function resetBenchParams() {
+  bench.paramCache = null;
+  bench._paramsRendered = false;
+  renderBenchParamsOnce();
+  updateBenchParamsCount();
 }
 function saveBenchParamCache() {
   const configs = Array.isArray(bench.paramConfig) ? bench.paramConfig : [];
@@ -581,8 +590,8 @@ function saveBenchParamCache() {
     const fn = (p.fullName || '').trim();
     if (!fn) continue;
     const fName = fieldNameFromParamConfig(p);
-    const enableChk = document.getElementById('param_enable_' + fName);
-    const ctrl = document.getElementById('param_' + fName);
+    const enableChk = document.getElementById('param_enable_bench_' + fName);
+    const ctrl = document.getElementById('param_bench_' + fName);
     if (ctrl) cache[fName] = { enabled: !!(enableChk && enableChk.checked), value: ctrl.value };
   }
   bench.paramCache = cache;
@@ -591,14 +600,15 @@ function restoreBenchParamCache() {
   const cache = bench.paramCache;
   if (!cache) return;
   for (const [fName, saved] of Object.entries(cache)) {
-    const enableChk = document.getElementById('param_enable_' + fName);
+    const enableChk = document.getElementById('param_enable_bench_' + fName);
     if (enableChk) enableChk.checked = !!saved.enabled;
-    const ctrl = document.getElementById('param_' + fName);
+    const ctrl = document.getElementById('param_bench_' + fName);
     if (ctrl && saved.value != null) ctrl.value = saved.value;
   }
 }
 function confirmBenchParams() {
   saveBenchParamCache();
+  if (typeof console !== 'undefined') console.log('paramCache saved, keys:', Object.keys(bench.paramCache || {}));
   updateBenchParamsCount();
   if (E.bench.paramsModal) E.bench.paramsModal.style.display = 'none';
 }
@@ -606,30 +616,32 @@ function closeBenchParamsModal() {
   updateBenchParamsCount();
   if (E.bench.paramsModal) E.bench.paramsModal.style.display = 'none';
 }
-function resetBenchParams() {
-  bench.paramCache = null;
-  renderBenchParams();
-}
 function buildBenchCmd() {
   const configs = Array.isArray(bench.paramConfig) ? bench.paramConfig : [];
+  const cache = bench.paramCache || {};
   const parts = [];
   for (const p of configs) {
     const fn = (p.fullName || '').trim();
     if (!fn) continue;
     const fName = fieldNameFromParamConfig(p);
-    const enableChk = document.getElementById('param_enable_' + fName);
-    if (!enableChk || !enableChk.checked) continue;
-    const ctrl = document.getElementById('param_' + fName);
-    if (!ctrl) continue;
+    const enableChk = document.getElementById('param_enable_bench_' + fName);
+    const ctrl = document.getElementById('param_bench_' + fName);
+    const cached = cache[fName];
+    const enabled = (enableChk && enableChk.checked) || (cached && cached.enabled);
+    if (!enabled) continue;
+    let val = ctrl ? ctrl.value : (cached ? cached.value : '');
+    if (val == null) val = '';
     const type = (p.type || 'STRING').toUpperCase();
     if (type === 'LOGIC') {
-      if (ctrl.value === '1' || ctrl.value === 'true') parts.push(fn);
+      if (val === '1' || val === 'true') parts.push(fn);
     } else {
-      const val = String(ctrl.value || '').trim();
+      val = String(val).trim();
       if (val) parts.push(fn + ' ' + val);
     }
   }
-  return parts.join(' ');
+  var result = parts.join(' ');
+  if (typeof console !== 'undefined') console.log('buildBenchCmd result:', result, 'config count:', configs.length);
+  return result;
 }
 function buildBenchDeviceArg() {
   const checks = E.bench.paramsDeviceList ? E.bench.paramsDeviceList.querySelectorAll('input[type=checkbox]') : [];
@@ -1407,3 +1419,7 @@ window.addEventListener('resize', () => {
 document.addEventListener('DOMContentLoaded', () => {
   if (!document.getElementById('sidebar')) initServerTab();
 });
+
+window.initServerTab = initServerTab;
+window.initBenchTab = initBenchTab;
+})();
