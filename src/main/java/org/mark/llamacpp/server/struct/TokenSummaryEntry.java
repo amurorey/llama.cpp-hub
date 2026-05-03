@@ -2,6 +2,7 @@ package org.mark.llamacpp.server.struct;
 
 public class TokenSummaryEntry {
 	private String modelId;
+	private long totalCacheTokens;
 	private long totalPromptTokens;
 	private long totalPredictedTokens;
 	private long totalTokens;
@@ -14,6 +15,14 @@ public class TokenSummaryEntry {
 
 	public void setModelId(String modelId) {
 		this.modelId = modelId;
+	}
+
+	public long getTotalCacheTokens() {
+		return totalCacheTokens;
+	}
+
+	public void setTotalCacheTokens(long totalCacheTokens) {
+		this.totalCacheTokens = totalCacheTokens;
 	}
 
 	public long getTotalPromptTokens() {

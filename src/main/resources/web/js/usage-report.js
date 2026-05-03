@@ -61,16 +61,19 @@
         let totalModels = tokenSummaryData.length;
         let totalPrompt = 0;
         let totalPredicted = 0;
+        let totalCache = 0;
         let cardHtml = '';
         const sorted = tokenSummaryData.slice().sort((a, b) => (b.totalTokens || 0) - (a.totalTokens || 0));
         for (const m of sorted) {
             totalPrompt += m.totalPromptTokens || 0;
             totalPredicted += m.totalPredictedTokens || 0;
+            totalCache += m.totalCacheTokens || 0;
             cardHtml += '<div class="token-card">'
                 + '<div class="tk-model">' + escapeHtml(m.modelId || '') + '</div>'
                 + '<div class="tk-tokens">'
                 + '<span>输入 ' + (m.totalPromptTokens || 0).toLocaleString() + '</span>'
                 + '<span>输出 ' + (m.totalPredictedTokens || 0).toLocaleString() + '</span>'
+                + '<span class="tk-cache">' + t('report.cache_label', '缓存') + ' ' + (m.totalCacheTokens || 0).toLocaleString() + '</span>'
                 + '</div>'
                 + '</div>';
         }
@@ -82,7 +85,8 @@
         stats.innerHTML = ''
             + '<div class="stat-card"><div class="stat-value">' + totalModels + '</div><div class="stat-label">有记录的模型</div></div>'
             + '<div class="stat-card"><div class="stat-value">' + totalPrompt.toLocaleString() + '</div><div class="stat-label">总输入 Token</div></div>'
-            + '<div class="stat-card"><div class="stat-value">' + totalPredicted.toLocaleString() + '</div><div class="stat-label">总输出 Token</div></div>';
+            + '<div class="stat-card"><div class="stat-value">' + totalPredicted.toLocaleString() + '</div><div class="stat-label">总输出 Token</div></div>'
+            + '<div class="stat-card"><div class="stat-value">' + totalCache.toLocaleString() + '</div><div class="stat-label">' + t('report.total_cache', '总缓存命中 Token') + '</div></div>';
 
         if (!canvasEl || !emptyEl || !wrapEl) return;
         if (!tokenSummaryData.length) {
@@ -238,6 +242,7 @@
                 + '<td>' + formatTime(r.startTime) + '</td>'
                 + '<td>' + escapeHtml(r.modelId || '') + '</td>'
                 + '<td>' + escapeHtml(r.endpoint || '') + '</td>'
+                + '<td>' + (r.cacheTokens || 0).toLocaleString() + '</td>'
                 + '<td>' + (r.promptTokens || 0).toLocaleString() + '</td>'
                 + '<td>' + (r.predictedTokens || 0).toLocaleString() + '</td>'
                 + '<td><strong>' + (r.totalTokens || 0).toLocaleString() + '</strong></td>'
@@ -247,7 +252,7 @@
                 + '</tr>';
         }
         if (!html) {
-            html = '<tr><td class="empty" colspan="9">暂无请求记录</td></tr>';
+            html = '<tr><td class="empty" colspan="10">暂无请求记录</td></tr>';
         }
         body.innerHTML = html;
     }

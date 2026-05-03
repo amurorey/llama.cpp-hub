@@ -6,6 +6,7 @@ public class RequestLogEntry {
 	private String endpoint;
 	private long startTime;
 	private long elapsedMs;
+	private int cacheTokens;
 	private int promptTokens;
 	private int predictedTokens;
 	private int totalTokens;
@@ -50,6 +51,14 @@ public class RequestLogEntry {
 
 	public void setElapsedMs(long elapsedMs) {
 		this.elapsedMs = elapsedMs;
+	}
+
+	public int getCacheTokens() {
+		return cacheTokens;
+	}
+
+	public void setCacheTokens(int cacheTokens) {
+		this.cacheTokens = cacheTokens;
 	}
 
 	public int getPromptTokens() {

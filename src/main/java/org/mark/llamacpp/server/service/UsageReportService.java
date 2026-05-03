@@ -44,8 +44,10 @@ public class UsageReportService {
 
 						 TokenSummaryEntry entry = new TokenSummaryEntry();
 						 entry.setModelId(modelId);
+						 long cacheN = getJsonLong(obj, "cache_n", 0);
 						 long promptN = getJsonLong(obj, "prompt_n", 0);
 						 long predictedN = getJsonLong(obj, "predicted_n", 0);
+						 entry.setTotalCacheTokens(cacheN);
 						 entry.setTotalPromptTokens(promptN);
 						 entry.setTotalPredictedTokens(predictedN);
 						 entry.setTotalTokens(promptN + predictedN);
@@ -111,8 +113,10 @@ public class UsageReportService {
 
 		if (obj.has("timing") && obj.get("timing").isJsonObject()) {
 			JsonObject timing = obj.getAsJsonObject("timing");
+			int cacheN = getJsonInt(timing, "cache_n", 0);
 			int promptN = getJsonInt(timing, "prompt_n", 0);
 			int predictedN = getJsonInt(timing, "predicted_n", 0);
+			entry.setCacheTokens(cacheN);
 			entry.setPromptTokens(promptN);
 			entry.setPredictedTokens(predictedN);
 			entry.setTotalTokens(promptN + predictedN);

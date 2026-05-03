@@ -923,5 +923,8 @@
   "modal.node.url_desc": "必须以 http:// 或 https:// 开头",
   "modal.node.tags": "标签（逗号分隔）",
 
-  "confirm.node.delete": "确认删除节点 \"{nodeId}\" ？"
+  "confirm.node.delete": "确认删除节点 \"{nodeId}\" ？",
+  "report.cache_label": "缓存",
+  "report.total_cache": "总缓存命中 Token",
+  "report.cache_tokens": "缓存 Token"
 }

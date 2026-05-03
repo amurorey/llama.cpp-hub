@@ -923,5 +923,8 @@
   "modal.node.url_desc": "Must start with http:// or https://",
   "modal.node.tags": "Tags (comma-separated)",
 
-  "confirm.node.delete": "Delete node \"{nodeId}\"?"
+  "confirm.node.delete": "Delete node \"{nodeId}\"?",
+  "report.cache_label": "Cache",
+  "report.total_cache": "Total Cache Hit Tokens",
+  "report.cache_tokens": "Cache"
 }
