@@ -313,7 +313,7 @@ function populateServerNodeFilter() {
     const nd = safeText(m && (m.nodeId || m.node)).trim();
     if (nd && nd !== 'local' && !seenNodeIds.has(nd)) {
       seenNodeIds.add(nd);
-      opts.push({ value: nd, text: nd });
+      opts.push({ value: nd, text: m.nodeName || nd });
     }
   }
   for (const o of opts) {

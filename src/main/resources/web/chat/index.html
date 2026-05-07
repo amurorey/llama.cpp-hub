@@ -4687,7 +4687,8 @@
             const option = document.createElement('option');
             option.value = id;
             const nodeId = typeof item?.nodeId === 'string' && item.nodeId !== 'local' ? item.nodeId : '';
-            option.textContent = nodeId ? '[' + nodeId + '] ' + id : id;
+            const nodeName = nodeId && typeof item?.nodeName === 'string' && item.nodeName ? item.nodeName : nodeId;
+            option.textContent = nodeId ? '[' + nodeName + '] ' + id : id;
             els.modelSelect.appendChild(option);
             if (nodeId) {
               modelNodeIdMap[id] = nodeId;
