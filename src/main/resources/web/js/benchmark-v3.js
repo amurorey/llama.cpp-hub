@@ -106,6 +106,19 @@ function nodeQueryParam(nodeId) {
 function setNodeIdOnBody(payload, nodeId) {
   if (nodeId) payload.nodeId = nodeId;
 }
+function modelLoadedKey(id, nodeId) {
+  return id + '::' + (nodeId || 'local');
+}
+function findModelButton(listEl, modelId, nodeId) {
+  if (!listEl) return null;
+  if (nodeId && nodeId !== 'all' && nodeId !== 'local') {
+    return listEl.querySelector('button[data-model-id="' + modelId + '"][data-node-id="' + nodeId + '"]');
+  }
+  if (!nodeId || nodeId === 'local') {
+    return listEl.querySelector('button[data-model-id="' + modelId + '"]:not([data-node-id])');
+  }
+  return listEl.querySelector('button[data-model-id="' + modelId + '"]');
+}
 function modelDisplayId(m) {
   const id = safeText(m && m.id).trim();
   const nd = safeText(m && (m.nodeId || m.node)).trim();
@@ -133,15 +146,21 @@ function modelNodeId(state, selectEl) {
   return effectiveNodeId(state);
 }
 function benchModelNodeId() {
+  if (bench.selectedModelId && bench.selectedNodeId) {
+    return bench.selectedNodeId === 'local' ? '' : bench.selectedNodeId;
+  }
   if (bench.selectedModelId) {
-    const btn = E.bench.modelList ? E.bench.modelList.querySelector('button[data-model-id="' + bench.selectedModelId + '"]') : null;
+    const btn = findModelButton(E.bench.modelList, bench.selectedModelId, bench.selectedNodeId);
     if (btn && btn.dataset && btn.dataset.nodeId) return btn.dataset.nodeId;
   }
   return effectiveNodeId(bench);
 }
 function serverModelNodeId() {
+  if (server.selectedModelId && server.selectedNodeId) {
+    return server.selectedNodeId === 'local' ? '' : server.selectedNodeId;
+  }
   if (server.selectedModelId) {
-    const btn = E.server.modelList ? E.server.modelList.querySelector('button[data-model-id="' + server.selectedModelId + '"]') : null;
+    const btn = findModelButton(E.server.modelList, server.selectedModelId, server.selectedNodeId);
     if (btn && btn.dataset && btn.dataset.nodeId) return btn.dataset.nodeId;
   }
   return effectiveNodeId(server);
@@ -158,23 +177,24 @@ function matchesFilter(state, model) {
 function updateModelsMeta(state, el, totalCount) {
   if (!el) return;
   const total = totalCount != null ? totalCount : (Array.isArray(state.allModels) ? state.allModels.length : 0);
-  const loaded = state.loadedModelIds ? state.loadedModelIds.size : 0;
+  const loadedInList = state.allModels ? state.allModels.filter(m => state.loadedModelIds && state.loadedModelIds.has(modelLoadedKey(safeText(m && m.id).trim(), m && (m.nodeId || m.node).trim()))).length : 0;
   if (state.filterText && total > 0) {
     const filtered = (state.allModels || []).filter(m => matchesFilter(state, m)).length;
-    el.textContent = '匹配 ' + filtered + '/' + total + '，已加载 ' + loaded;
+    el.textContent = '匹配 ' + filtered + '/' + total + '，已加载 ' + loadedInList;
   } else {
-    el.textContent = '总计 ' + total + '，已加载 ' + loaded;
+    el.textContent = '总计 ' + total + '，已加载 ' + loadedInList;
   }
 }
 function updateActiveModelItem(state, listEl) {
   if (!listEl) return;
+  const selId = state.selectedModelId;
+  const selNode = state.selectedNodeId || '';
   listEl.querySelectorAll('button[data-model-id]').forEach(btn => {
     const btnModelId = btn.dataset.modelId;
     const btnNodeId = btn.dataset.nodeId || '';
-    const selectedId = state.selectedModelId;
-    if (!selectedId || btnModelId !== selectedId) { btn.classList.remove('active'); return; }
-    if (!state.selectedNodeId || state.selectedNodeId === 'all') { btn.classList.add('active'); return; }
-    btn.classList.toggle('active', btnNodeId === state.selectedNodeId || (!btnNodeId && state.selectedNodeId === 'local'));
+    if (!selId || btnModelId !== selId) { btn.classList.remove('active'); return; }
+    if (!selNode || selNode === 'all') { btn.classList.add('active'); return; }
+    btn.classList.toggle('active', btnNodeId === selNode || (!btnNodeId && selNode === 'local'));
   });
 }
 function renderBenchModelList(state, listEl, metaEl) {
@@ -236,14 +256,15 @@ function buildModelItem(m, state) {
   const nd = safeText(m && (m.nodeId || m.node)).trim();
   const isRemote = nd && nd !== 'local';
   const hue = getNodeColor(nd);
+  const key = modelLoadedKey(id, nd);
   const btn = document.createElement('button');
   btn.type = 'button'; btn.className = 'model-menu-item'; btn.dataset.modelId = id;
   if (isRemote) { btn.dataset.nodeId = nd; btn.style.borderLeft = '3px solid hsl(' + hue + ',65%,50%)'; }
-  if (state.loadedModelIds && state.loadedModelIds.has(id)) btn.classList.add('loaded');
+  if (state.loadedModelIds && state.loadedModelIds.has(key)) btn.classList.add('loaded');
   const n = document.createElement('div'); n.className = 'name';
   n.textContent = getModelDisplayName(m);
   const t = document.createElement('div'); t.className = 'meta';
-  const statusText = state.loadedModelIds && state.loadedModelIds.has(id) ? '已加载' : '';
+  const statusText = state.loadedModelIds && state.loadedModelIds.has(key) ? '已加载' : '';
   const parts = [];
   if (isRemote) parts.push(nodeBadgeHtml(nd, m.nodeName));
   if (statusText) parts.push(escapeHtml(statusText));
@@ -343,7 +364,7 @@ async function loadBenchAllModels() {
         const ld = await fetchJson('/api/models/loaded', { method: 'GET' });
         const models = Array.isArray(ld && ld.models) ? ld.models : [];
         bench.loadedModels = models;
-        bench.loadedModelIds = new Set(models.map(m => safeText(m && m.id).trim()).filter(Boolean));
+        bench.loadedModelIds = new Set(models.map(m => modelLoadedKey(safeText(m && m.id).trim(), m && m.nodeId)).filter(Boolean));
       } catch(e) { /* ignore */ }
     }
   } catch(e) { bench.allModels = []; }
@@ -755,7 +776,7 @@ async function runBench() {
     const fullCmd = cmd + (devArg ? ' ' + devArg : '');
     let llamaBinPath = (E.bench.llamaBinSelect && E.bench.llamaBinSelect.value || '').trim();
     if (!llamaBinPath) {
-      const m = (Array.isArray(bench.allModels) ? bench.allModels : []).find(x => x.id === modelId);
+      const m = (Array.isArray(bench.allModels) ? bench.allModels : []).find(x => x.id === modelId && (!bench.selectedNodeId || bench.selectedNodeId === 'all' || (x.nodeId || 'local') === bench.selectedNodeId));
       if (m && m.llamaBinPath) llamaBinPath = m.llamaBinPath;
     }
     const payload = { modelId, cmd: fullCmd };
@@ -943,8 +964,9 @@ function setBenchMeta(msg, isTransient) {
     E.bench.outputMeta.textContent = msg;
   }
 }
-function benchSelectModel(id) {
+function benchSelectModel(id, nodeId) {
   bench.selectedModelId = id;
+  bench.selectedNodeId = nodeId || '';
   bench.selectedFileName = '';
   bench.selectedFileData = null;
   updateActiveModelItem(bench, E.bench.modelList);
@@ -975,7 +997,7 @@ async function loadServerModels() {
       const ld = await fetchJson('/api/models/loaded', { method: 'GET' });
       const loaded = Array.isArray(ld && ld.models) ? ld.models : [];
       server.loadedModels = loaded;
-      server.loadedModelIds = new Set(loaded.map(m => safeText(m && m.id).trim()).filter(Boolean));
+      server.loadedModelIds = new Set(loaded.map(m => modelLoadedKey(safeText(m && m.id).trim(), m && m.nodeId)).filter(Boolean));
     } catch(e) { server.loadedModels = []; server.loadedModelIds = new Set(); }
   } catch(e) { server.loadedModels = []; server.loadedModelIds = new Set(); server.allModels = []; }
 }
@@ -993,7 +1015,8 @@ async function runServer() {
   const concurrencyRaw = parseInt(E.server.concurrency.value, 10);
   const concurrency = Number.isFinite(concurrencyRaw) ? concurrencyRaw : NaN;
   if (!modelId) { E.server.status.textContent = '请选择模型'; return; }
-  if (!server.loadedModelIds.has(modelId)) { E.server.status.textContent = '模型未加载'; return; }
+  const nodeId = serverModelNodeId();
+  if (!server.loadedModelIds.has(modelLoadedKey(modelId, nodeId || 'local'))) { E.server.status.textContent = '模型未加载'; return; }
   if (!Number.isFinite(promptTokens) || promptTokens <= 0) { E.server.status.textContent = '提示词长度必须大于0'; return; }
   if (!Number.isFinite(maxTokens) || maxTokens <= 0) { E.server.status.textContent = '输出最大token必须大于0'; return; }
   if (!Number.isFinite(concurrency) || concurrency <= 0) { E.server.status.textContent = '并发次数必须大于0'; return; }
@@ -1133,10 +1156,11 @@ async function loadServerRecords(mode) {
     E.server.status.textContent = e.message || '记录加载失败';
   }
 }
-function serverSelectModel(id) {
+function serverSelectModel(id, nodeId) {
   server.selectedModelId = id;
+  server.selectedNodeId = nodeId || '';
   updateActiveModelItem(server, E.server.modelList);
-  const isLoaded = id && server.loadedModelIds.has(id);
+  const isLoaded = id && server.loadedModelIds.has(modelLoadedKey(id, nodeId));
   E.server.runBtn.disabled = !isLoaded;
   E.server.runBtn.title = isLoaded ? '' : '模型未加载，无法运行测试';
   const nd = serverModelNodeId();
@@ -1376,14 +1400,14 @@ function cancelBench() {
 // llama-bench
 E.bench.runBtn.addEventListener('click', runBench);
 E.bench.modelList.addEventListener('click', e => {
-  const t = e.target.closest('button[data-model-id]'); if (t) benchSelectModel(t.dataset.modelId);
+  const t = e.target.closest('button[data-model-id]'); if (t) benchSelectModel(t.dataset.modelId, t.dataset.nodeId);
 });
 E.bench.searchInput.addEventListener('input', e => { bench.filterText = (e.target.value || '').trim(); renderBenchModelList(bench, E.bench.modelList, E.bench.modelsMeta); });
 E.bench.nodeFilter.addEventListener('change', () => {
   bench.selectedNodeId = E.bench.nodeFilter.value;
   loadBenchLlamaCppPaths(effectiveNodeId(bench));
   renderBenchModelList(bench, E.bench.modelList, E.bench.modelsMeta);
-  if (bench.selectedModelId) { benchSelectModel(bench.selectedModelId); }
+  if (bench.selectedModelId) { benchSelectModel(bench.selectedModelId, bench.selectedNodeId); }
 });
 if (E.bench.copyBtn) E.bench.copyBtn.addEventListener('click', benchCopyOutput);
 if (E.bench.exportBtn) E.bench.exportBtn.addEventListener('click', benchExportText);
@@ -1401,11 +1425,11 @@ E.server.searchInput.addEventListener('input', e => { server.filterText = (e.tar
 E.server.nodeFilter.addEventListener('change', () => {
   server.selectedNodeId = E.server.nodeFilter.value;
   renderServerModelList(server, E.server.modelList, E.server.modelsMeta);
-  if (server.selectedModelId) { serverSelectModel(server.selectedModelId); }
+  if (server.selectedModelId) { serverSelectModel(server.selectedModelId, server.selectedNodeId); }
 });
 E.server.modelList.addEventListener('click', e => {
   const t = e.target.closest('button[data-model-id]'); if (t) {
-    serverSelectModel(t.dataset.modelId);
+    serverSelectModel(t.dataset.modelId, t.dataset.nodeId);
   }
 });
 E.server.exportBtns.forEach(btn => {

@@ -859,21 +859,27 @@ function loadModelCapabilities(modelId, modal) {
         });
 }
 
-function getCurrentModelById(modelId) {
+function getCurrentModelById(modelId, nodeId) {
     const mid = modelId === null || modelId === undefined ? '' : String(modelId).trim();
     if (!mid) return null;
     const list = Array.isArray(currentModelsData) ? currentModelsData : [];
     for (let i = 0; i < list.length; i++) {
         const model = list[i];
-        if (model && String(model.id) === mid) return model;
+        if (model && String(model.id) === mid) {
+            if (nodeId) {
+                if ((model.nodeId || '') === nodeId) return model;
+            } else {
+                if (!model.nodeId || model.nodeId === 'local') return model;
+            }
+        }
     }
     return null;
 }
 
-function resolveModelActionSubmitIntent(mode, modelId) {
+function resolveModelActionSubmitIntent(mode, modelId, nodeId) {
     if (mode === 'benchmark') return 'benchmark';
     if (mode === 'config') return 'config';
-    const model = getCurrentModelById(modelId);
+    const model = getCurrentModelById(modelId, nodeId);
     if (model && !!model.isLoaded) return 'stop';
     return 'load';
 }
@@ -884,7 +890,8 @@ function applyModelActionSubmitButtonState(modal, mode) {
         || findInModal(modal, '.modal-footer .btn-primary');
     if (!submitBtn) return;
     const modelId = getFieldString(modal, ['modelId']);
-    const intent = resolveModelActionSubmitIntent(mode, modelId);
+    const nodeId = modal && modal.__nodeId ? modal.__nodeId : '';
+    const intent = resolveModelActionSubmitIntent(mode, modelId, nodeId);
     window.__modelActionSubmitIntent = intent;
     if (intent === 'benchmark') {
         submitBtn.classList.remove('btn-danger');
@@ -978,7 +985,9 @@ function loadModel(modelId, modelName, param1, param2) {
     window.__availableDeviceCount = 0;
     renderMainGpuSelect([], window.__loadModelSelectedDevices || []);
 
-    const currentModel = (currentModelsData || []).find(m => m && m.id === modelId);
+    const currentModel = nodeId
+        ? (currentModelsData || []).find(m => m && m.id === modelId && m.nodeId === nodeId)
+        : (currentModelsData || []).find(m => m && m.id === modelId && (!m.nodeId || m.nodeId === 'local'));
     const isVisionModel = !!(currentModel && (currentModel.isMultimodal || currentModel.mmproj));
     const enableVisionGroup = findById(modal, 'enableVisionGroup');
     if (enableVisionGroup) enableVisionGroup.style.display = isVisionModel ? '' : 'none';
@@ -1139,7 +1148,7 @@ function submitModelAction() {
         showToast(t('toast.error', '错误'), t('modal.model_action.benchmark.missing_handler', '未找到模型性能测试函数'), 'error');
         return;
     }
-    const submitIntent = resolveModelActionSubmitIntent(mode, getFieldString(modal, ['modelId']));
+    const submitIntent = resolveModelActionSubmitIntent(mode, getFieldString(modal, ['modelId']), modal.__nodeId || '');
     if (mode === 'load' && submitIntent === 'stop') {
         const modelIdForStop = getFieldString(modal, ['modelId']);
         const submitBtn = findById(modal, 'modelActionSubmitBtn')
@@ -1408,10 +1417,12 @@ function estimateVramAction() {
 
 function estimateVram() { estimateVramAction(); }
 
-function viewModelConfig(modelId) {
-    const currentModel = (currentModelsData || []).find(m => m && m.id === modelId);
-    const nodeId = currentModel ? (currentModel.nodeId || '') : '';
-    loadModel(modelId, currentModel ? currentModel.name : modelId, '', nodeId);
+function viewModelConfig(modelId, nodeId) {
+    const currentModel = nodeId
+        ? (currentModelsData || []).find(m => m && m.id === modelId && m.nodeId === nodeId)
+        : (currentModelsData || []).find(m => m && m.id === modelId && (!m.nodeId || m.nodeId === 'local'));
+    const resolvedNodeId = currentModel ? (currentModel.nodeId || '') : (nodeId || '');
+    loadModel(modelId, currentModel ? currentModel.name : modelId, '', resolvedNodeId);
 }
 
 function normalizeDeviceSelection(device) {

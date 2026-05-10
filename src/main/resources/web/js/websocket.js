@@ -110,7 +110,7 @@ function applyModelPatch(modelId, patch, nodeId) {
         if (nodeId) {
             i = currentModelsData.findIndex(m => m && m.id === modelId && m.nodeId === nodeId);
         } else {
-            i = currentModelsData.findIndex(m => m && m.id === modelId);
+            i = currentModelsData.findIndex(m => m && m.id === modelId && (!m.nodeId || m.nodeId === 'local'));
         }
         if (i < 0) return;
         const prev = currentModelsData[i] || {};
@@ -177,7 +177,7 @@ function handleModelSlotsUpdate(data) {
     if (data.nodeId) {
         i = Array.isArray(currentModelsData) ? currentModelsData.findIndex(m => m && m.id === data.modelId && m.nodeId === data.nodeId) : -1;
     } else {
-        i = Array.isArray(currentModelsData) ? currentModelsData.findIndex(m => m && m.id === data.modelId) : -1;
+        i = Array.isArray(currentModelsData) ? currentModelsData.findIndex(m => m && m.id === data.modelId && (!m.nodeId || m.nodeId === 'local')) : -1;
     }
     if (i >= 0) {
         currentModelsData[i].slots = slots;
