@@ -286,6 +286,16 @@ public class DownloadTaskManager implements Closeable {
 		}
 	}
 
+	/**
+	 * DEAD CODE — never called. The success path in {@code startTask()} (line 120) only calls
+	 * {@code notifyStateChanged(..., COMPLETED)}, which already fires {@code onStateChanged} to all listeners.
+	 * {@code DownloadWebSocketListener.onStateChanged} sends the same {@code download_update} SSE event with
+	 * state="COMPLETED", so the frontend receives the completion notification without this method.
+	 * Retained only because {@code DownloadProgressListener.onTaskCompleted} still exists in the interface.
+	 * Both should be removed together in a future cleanup.
+	 */
+	@SuppressWarnings("unused")
+	@Deprecated
 	private void notifyTaskCompleted(DownloadTaskInfo task) {
 		for (DownloadProgressListener listener : this.listeners.values()) {
 			try {
