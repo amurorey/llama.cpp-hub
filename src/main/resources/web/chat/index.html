@@ -950,70 +950,71 @@
       return restoreMathTokens(rendered, protectedMath.math);
     }
 
-    function renderRichText(target, text, options = {}) {
-      if (!target) {
-        return;
-      }
-      const source = String(text ?? '');
-      const isStreaming = !!options.isStreaming;
-      if (isStreaming) {
-        target.innerHTML = escapeHtml(source).replace(/\n/g, '<br>');
-      } else {
-        target.innerHTML = renderMarkdown(source);
-      }
-      if (!isStreaming && window.hljs && typeof window.hljs.highlightElement === 'function' && (source.includes('```') || source.includes('`'))) {
-        const blocks = target.querySelectorAll('pre code');
-        for (const block of blocks) {
-          window.hljs.highlightElement(block);
-        }
-      }
-      if (!isStreaming) {
-        const pres = target.querySelectorAll('pre');
-        for (const pre of pres) {
-          if (pre.querySelector('.code-copy-btn')) continue;
-          const btn = document.createElement('button');
-          btn.type = 'button';
-          btn.className = 'code-copy-btn';
-          btn.setAttribute('aria-label', '复制代码');
-          btn.title = '复制代码';
-          btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M6 15V6a2 2 0 0 1 2-2h9"></path></svg>';
-          btn.addEventListener('click', () => {
-            const code = pre.querySelector('code');
-            const text = (code ? code.textContent : pre.textContent) || '';
-            if (!text.trim()) return;
-            navigator.clipboard.writeText(text).then(() => {
-              btn.classList.add('copied');
-              btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
-              setTimeout(() => {
-                btn.classList.remove('copied');
-                btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M6 15V6a2 2 0 0 1 2-2h9"></path></svg>';
-              }, 1500);
-            }).catch(() => {
-              try {
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.position = 'fixed';
-                ta.style.opacity = '0';
-                document.body.appendChild(ta);
-                ta.select();
-                document.execCommand('copy');
-                document.body.removeChild(ta);
-                btn.classList.add('copied');
-                btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
-                setTimeout(() => {
-                  btn.classList.remove('copied');
-                  btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M6 15V6a2 2 0 0 1 2-2h9"></path></svg>';
-                }, 1500);
-              } catch (e) { /* clipboard unavailable */ }
-            });
-          });
-          pre.appendChild(btn);
-        }
-      }
-      if (!isStreaming && /[\\$]/.test(source)) {
-        requestMathTypeset(target);
-      }
-    }
+     function renderRichText(target, text, options = {}) {
+       if (!target) {
+         return;
+       }
+       const source = String(text ?? '');
+       const isStreaming = !!options.isStreaming;
+       const isUser = options.role === 'user';
+       if (isStreaming || isUser) {
+         target.innerHTML = escapeHtml(source).replace(/\n/g, '<br>');
+       } else {
+         target.innerHTML = renderMarkdown(source);
+       }
+       if (!isStreaming && !isUser && window.hljs && typeof window.hljs.highlightElement === 'function' && (source.includes('```') || source.includes('`'))) {
+         const blocks = target.querySelectorAll('pre code');
+         for (const block of blocks) {
+           window.hljs.highlightElement(block);
+         }
+       }
+       if (!isStreaming && !isUser) {
+         const pres = target.querySelectorAll('pre');
+         for (const pre of pres) {
+           if (pre.querySelector('.code-copy-btn')) continue;
+           const btn = document.createElement('button');
+           btn.type = 'button';
+           btn.className = 'code-copy-btn';
+           btn.setAttribute('aria-label', '复制代码');
+           btn.title = '复制代码';
+           btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M6 15V6a2 2 0 0 1 2-2h9"></path></svg>';
+           btn.addEventListener('click', () => {
+             const code = pre.querySelector('code');
+             const text = (code ? code.textContent : pre.textContent) || '';
+             if (!text.trim()) return;
+             navigator.clipboard.writeText(text).then(() => {
+               btn.classList.add('copied');
+               btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
+               setTimeout(() => {
+                 btn.classList.remove('copied');
+                 btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M6 15V6a2 2 0 0 1 2-2h9"></path></svg>';
+               }, 1500);
+             }).catch(() => {
+               try {
+                 const ta = document.createElement('textarea');
+                 ta.value = text;
+                 ta.style.position = 'fixed';
+                 ta.style.opacity = '0';
+                 document.body.appendChild(ta);
+                 ta.select();
+                 document.execCommand('copy');
+                 document.body.removeChild(ta);
+                 btn.classList.add('copied');
+                 btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
+                 setTimeout(() => {
+                   btn.classList.remove('copied');
+                   btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M6 15V6a2 2 0 0 1 2-2h9"></path></svg>';
+                 }, 1500);
+               } catch (e) { /* clipboard unavailable */ }
+             });
+           });
+           pre.appendChild(btn);
+         }
+       }
+       if (!isStreaming && !isUser && /[\\$]/.test(source)) {
+         requestMathTypeset(target);
+       }
+     }
 
     // ── Streaming Text Render（增量追加 TextNode，避免每 token innerHTML 全量替换）──
     const streamingTextCache = new WeakMap();
@@ -3251,7 +3252,7 @@
           if (message.isStreaming) {
             appendStreamingText(content, message.content || '');
           } else {
-            renderRichText(content, message.content || '', { isStreaming: false });
+            renderRichText(content, message.content || '', { isStreaming: false, role: message.role });
           }
           bubble.appendChild(content);
         }
@@ -3480,7 +3481,7 @@
             appendStreamingText(reasoningBody, message.reasoning || '');
           } else {
             clearStreamingCache(reasoningBody);
-            renderRichText(reasoningBody, message.reasoning, { isStreaming: false });
+            renderRichText(reasoningBody, message.reasoning, { isStreaming: false, role: message.role });
           }
         }
       } else if (reasoningBox) {
@@ -3498,7 +3499,7 @@
           appendStreamingText(contentDiv, message.content || '');
         } else {
           clearStreamingCache(contentDiv);
-          renderRichText(contentDiv, message.content || '', { isStreaming: false });
+          renderRichText(contentDiv, message.content || '', { isStreaming: false, role: message.role });
         }
       } else if (contentDiv) {
         contentDiv.remove();
