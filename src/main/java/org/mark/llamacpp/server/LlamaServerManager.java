@@ -1270,7 +1270,13 @@ public class LlamaServerManager {
 		if (!cmdHasFlag(allArgs, "--cache-ram")) {
 			sb.append(" --cache-ram -1");
 		}
-		sb.append(" --alias ").append(targetModel.getModelId());
+		if (!cmdHasFlag(allArgs, "--alias")) {
+			String alias = targetModel.getAlias();
+			if (alias == null || alias.trim().isEmpty()) {
+				alias = targetModel.getModelId();
+			}
+			sb.append(" --alias ").append(ParamTool.quoteIfNeeded(alias));
+		}
 		
 		sb.append(" --timeout 36000");
 		// 允许任意IP地址访问
