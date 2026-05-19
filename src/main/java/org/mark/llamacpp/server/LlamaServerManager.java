@@ -1243,12 +1243,14 @@ public class LlamaServerManager {
 		}
 
 		if (cmd != null && !cmd.trim().isEmpty()) {
+			String processed = splitSpecType(cmd.trim());
 			sb.append(' ');
-			sb.append(cmd.trim());
+			sb.append(processed);
 		}
 		if (extraParams != null && !extraParams.trim().isEmpty()) {
+			String processed = splitSpecType(extraParams.trim());
 			sb.append(' ');
-			sb.append(extraParams.trim());
+			sb.append(processed);
 		}
 		if (chatTemplateFilePath != null && !chatTemplateFilePath.trim().isEmpty() && !cmdHasFlag(allArgs, "--chat-template-file") && !cmdHasFlag(allArgs, "--chat-template")) {
 			sb.append(" --chat-template-file ");
@@ -1295,6 +1297,15 @@ public class LlamaServerManager {
 	private static boolean isWindows() {
 		String os = System.getProperty("os.name");
 		return os != null && os.toLowerCase(Locale.ROOT).contains("win");
+	}
+
+	/**
+	 * 将 --spec-type_xxx 拆分为 --spec-type xxx（两个 token）。
+	 * llama-server 要求 --spec-type 与其值作为独立参数。
+	 */
+	private static String splitSpecType(String input) {
+		if (input == null || input.isEmpty()) return input;
+		return input.replace("--spec-type_", "--spec-type ");
 	}
 	
 	//##########################################################################################
