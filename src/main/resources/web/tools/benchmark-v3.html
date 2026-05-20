@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>性能测试</title>
+  <title data-i18n="page.benchmark_v3.title">性能测试</title>
   <link rel="stylesheet" href="../css/all.min.css" />
   <link href="../css/css2.css" rel="stylesheet" />
   <link rel="stylesheet" href="../css/index.css" />
@@ -213,12 +213,12 @@
 <div class="page">
 
   <div class="top">
-    <h1 class="title"><i class="fas fa-gauge-high"></i> <span>性能测试</span></h1>
+    <h1 class="title"><i class="fas fa-gauge-high"></i> <span data-i18n="page.benchmark_v3.title">性能测试</span></h1>
   </div>
 
   <div class="warn-banner">
     <i class="fas fa-triangle-exclamation"></i>
-    <span>性能测试会对计算机产生较高的负载，并且根据计算机性能的不同（如 CPU 推理 VS RTX 5090 推理）花费的时间也不同，请务必了解这一点！</span>
+    <span data-i18n="page.benchmark_v3.warn_banner">性能测试会对计算机产生较高的负载，并且根据计算机性能的不同（如 CPU 推理 VS RTX 5090 推理）花费的时间也不同，请务必了解这一点！</span>
   </div>
 
   <div class="tab-bar">
@@ -236,16 +236,16 @@
       <div class="left-col">
         <div class="card stretch">
           <div class="model-list-header">
-            <strong style="font-size:12px;">模型列表</strong>
+            <strong data-i18n="page.benchmark_v3.model_list" style="font-size:12px;">模型列表</strong>
             <span id="benchModelsMeta" class="sub-text"></span>
           </div>
           <div class="row">
             <select id="benchNodeFilter" class="form-control">
-              <option value="all">全部节点</option>
-              <option value="local">本机</option>
+              <option value="all" data-i18n="page.benchmark_v3.filter.all_nodes">全部节点</option>
+              <option value="local" data-i18n="page.benchmark_v3.filter.local">本机</option>
             </select>
           </div>
-          <input id="benchSearchInput" type="text" class="form-control" placeholder="搜索模型…" style="flex-shrink:0;" />
+          <input id="benchSearchInput" type="text" class="form-control" data-i18n="page.benchmark_v3.search_placeholder" data-i18n-attr="placeholder" placeholder="搜索模型…" style="flex-shrink:0;" />
           <div id="benchModelList" class="model-menu"></div>
         </div>
       </div>
@@ -253,14 +253,14 @@
       <div class="right-col">
         <div class="card shrink">
           <div class="bench-actions">
-            <button id="runBenchBtn" class="btn btn-primary" style="font-size:12px;">运行</button>
-            <button id="benchParamsBtn" class="btn" style="font-size:12px;">参数设置</button>
+            <button id="runBenchBtn" class="btn btn-primary" data-i18n="page.benchmark_v3.run" style="font-size:12px;">运行</button>
+            <button id="benchParamsBtn" class="btn" data-i18n="page.benchmark_v3.params_settings" style="font-size:12px;">参数设置</button>
           </div>
         </div>
 
         <div class="card shrink">
           <div class="row">
-            <label>Llama.cpp 版本</label>
+            <label data-i18n="page.benchmark_v3.llamacpp_version">Llama.cpp 版本</label>
             <select id="benchLlamaBinSelect" class="form-control"></select>
           </div>
         </div>
@@ -268,26 +268,26 @@
         <div class="rec-card">
           <div class="rec-header">
             <div class="left-group">
-              <strong style="font-size:12px;">测试结果</strong>
+              <strong data-i18n="page.benchmark_v3.results" style="font-size:12px;">测试结果</strong>
               <span id="benchSelModelText" class="pill" style="display:none;"></span>
             </div>
             <div class="export-btns">
-              <button id="benchCopyBtn" class="record-action-btn" disabled><i class="fas fa-copy"></i> 复制</button>
-              <button id="benchExportBtn" class="record-action-btn" disabled><i class="fas fa-download"></i> TXT</button>
+              <button id="benchCopyBtn" class="record-action-btn" data-i18n="page.benchmark_v3.copy" disabled><i class="fas fa-copy"></i> 复制</button>
+              <button id="benchExportBtn" class="record-action-btn" data-i18n="page.benchmark_v3.export_txt" disabled><i class="fas fa-download"></i> TXT</button>
             </div>
           </div>
           <div class="bench-result-body">
             <div class="history-col">
               <div class="history-header">
-                <span>历史记录</span>
+                <span data-i18n="page.benchmark_v3.history">历史记录</span>
                 <span id="benchHistoryCount" style="font-size:10px;"></span>
               </div>
               <div id="benchHistoryList" class="history-list">
-                <div class="history-empty">请选择模型</div>
+                <div class="history-empty" data-i18n="page.benchmark_v3.select_model">请选择模型</div>
               </div>
             </div>
             <div class="output-col">
-              <pre id="benchOutput" style="flex:1;min-height:0;overflow:auto;margin:0;padding:10px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;font-size:11px;font-family:'Consolas','Monaco','Courier New',monospace;line-height:1.5;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);">暂无结果</pre>
+              <pre id="benchOutput" data-i18n="page.benchmark_v3.no_results" style="flex:1;min-height:0;overflow:auto;margin:0;padding:10px;background:var(--bg-color);border:1px solid var(--border-color);border-radius:8px;font-size:11px;font-family:'Consolas','Monaco','Courier New',monospace;line-height:1.5;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);">暂无结果</pre>
               <div id="benchOutputMeta" class="output-meta"></div>
             </div>
           </div>
@@ -304,16 +304,16 @@
       <div class="left-col">
         <div class="card stretch">
           <div class="model-list-header">
-            <strong style="font-size:12px;">模型列表</strong>
+            <strong data-i18n="page.benchmark_v3.model_list" style="font-size:12px;">模型列表</strong>
             <span id="serverModelsMeta" class="sub-text"></span>
           </div>
           <div class="row">
             <select id="serverNodeFilter" class="form-control">
-              <option value="all">全部节点</option>
-              <option value="local">本机</option>
+              <option value="all" data-i18n="page.benchmark_v3.filter.all_nodes">全部节点</option>
+              <option value="local" data-i18n="page.benchmark_v3.filter.local">本机</option>
             </select>
           </div>
-          <input id="serverSearchInput" type="text" class="form-control" placeholder="搜索模型…" style="flex-shrink:0;" />
+          <input id="serverSearchInput" type="text" class="form-control" data-i18n="page.benchmark_v3.search_placeholder" data-i18n-attr="placeholder" placeholder="搜索模型…" style="flex-shrink:0;" />
           <div id="serverModelList" class="model-menu"></div>
         </div>
       </div>
@@ -321,19 +321,19 @@
       <div class="mid-col">
         <div class="card shrink">
           <div class="row">
-            <label>提示词长度</label>
+            <label data-i18n="page.benchmark_v3.prompt_tokens">提示词长度</label>
             <input id="serverPromptTokens" type="number" class="form-control" value="8192" min="1" />
           </div>
           <div class="row">
-            <label>输出最大 token</label>
+            <label data-i18n="page.benchmark_v3.max_tokens">输出最大 token</label>
             <input id="serverMaxTokens" type="number" class="form-control" value="256" min="1" />
           </div>
           <div class="row">
-            <label>并发次数</label>
+            <label data-i18n="page.benchmark_v3.concurrency">并发次数</label>
             <input id="serverConcurrency" type="number" class="form-control" value="1" min="1" step="1" />
           </div>
           <div class="bench-actions">
-            <button id="runServerBtn" class="btn btn-primary" style="font-size:12px;width:100%;">运行</button>
+            <button id="runServerBtn" class="btn btn-primary" data-i18n="page.benchmark_v3.run" style="font-size:12px;width:100%;">运行</button>
           </div>
         </div>
       </div>
@@ -342,27 +342,27 @@
         <div class="rec-card">
           <div class="rec-header">
             <div class="left-group">
-              <strong style="font-size:12px;">测试记录</strong>
+              <strong data-i18n="page.benchmark_v3.records" style="font-size:12px;">测试记录</strong>
               <span id="serverSelModelText" class="pill" style="display:none;"></span>
               <span id="serverStatus" class="sub-text"></span>
             </div>
             <div class="export-btns">
-              <button class="server-export" data-format="csv"><i class="fas fa-file-csv"></i> CSV</button>
-              <button class="server-export" data-format="json"><i class="fas fa-file-code"></i> JSON</button>
-              <button class="server-export" data-format="md"><i class="fas fa-markdown"></i> MD</button>
+              <button class="server-export" data-format="csv" data-i18n="page.benchmark_v3.export_csv"><i class="fas fa-file-csv"></i> CSV</button>
+              <button class="server-export" data-format="json" data-i18n="page.benchmark_v3.export_json"><i class="fas fa-file-code"></i> JSON</button>
+              <button class="server-export" data-format="md" data-i18n="page.benchmark_v3.export_md"><i class="fas fa-markdown"></i> MD</button>
             </div>
           </div>
           <div class="chart-wrap" id="serverChartWrap">
             <canvas id="serverChartCanvas"></canvas>
-            <div id="serverChartEmpty" class="chart-empty">暂无数据</div>
+            <div id="serverChartEmpty" class="chart-empty" data-i18n="page.benchmark_v3.chart_empty">暂无数据</div>
           </div>
           <div class="table-wrap">
             <table class="result-table">
               <thead><tr>
-                <th>时间</th><th>模型</th><th>提示词</th><th>预填充(token/s)</th><th>输出</th><th>输出(token/s)</th><th>操作</th>
+                <th data-i18n="page.benchmark_v3.table.time">时间</th><th data-i18n="page.benchmark_v3.table.model">模型</th><th data-i18n="page.benchmark_v3.table.prompt">提示词</th><th data-i18n="page.benchmark_v3.table.prefill_speed">预填充(token/s)</th><th data-i18n="page.benchmark_v3.table.output">输出</th><th data-i18n="page.benchmark_v3.table.output_speed">输出(token/s)</th><th data-i18n="page.benchmark_v3.table.actions">操作</th>
               </tr></thead>
               <tbody id="serverResultBody">
-                <tr id="serverEmptyRow"><td class="empty" colspan="7">暂无记录</td></tr>
+                <tr id="serverEmptyRow"><td class="empty" colspan="7" data-i18n="page.benchmark_v3.no_records">暂无记录</td></tr>
               </tbody>
             </table>
           </div>
@@ -378,32 +378,32 @@
 <div id="benchParamsModal" class="bench-modal-overlay" style="display:none;">
   <div class="bench-modal-dialog">
     <div class="bench-modal-header">
-      <h2 style="margin:0;font-size:17px;font-weight:700;">参数设置</h2>
+      <h2 style="margin:0;font-size:17px;font-weight:700;" data-i18n="page.benchmark_v3.params_settings">参数设置</h2>
       <div style="display:flex;align-items:center;gap:8px;">
         <span id="benchParamsModalStatus" class="sub-text"></span>
-        <button id="benchParamsResetBtn" class="record-action-btn">重置</button>
+        <button id="benchParamsResetBtn" class="record-action-btn" data-i18n="common.reset">重置</button>
         <button id="benchParamsCloseBtn" class="record-action-btn"><i class="fas fa-times"></i></button>
       </div>
     </div>
     <div class="bench-modal-body" style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr;gap:16px;overflow:hidden;padding:0;">
       <div id="benchParamsDevicePanel" style="display:flex;flex-direction:column;gap:6px;min-height:0;padding:14px 0 14px 18px;">
-        <label class="form-label" style="font-size:13px;">GPU 设备</label>
-        <small class="form-text">勾选要使用的 GPU，取消勾选则生成 -dev 参数排除该设备</small>
+        <label class="form-label" style="font-size:13px;" data-i18n="page.benchmark_v3.gpu_devices">GPU 设备</label>
+        <small class="form-text" data-i18n="page.benchmark_v3.gpu_devices_desc">勾选要使用的 GPU，取消勾选则生成 -dev 参数排除该设备</small>
         <div id="benchParamsDeviceList" style="border:1px solid var(--border-color);border-radius:0.75rem;padding:0.5rem;max-height:60vh;overflow:auto;">
-          <div class="device-placeholder">选择 llama.cpp 版本后显示</div>
+          <div class="device-placeholder" data-i18n="page.benchmark_v3.select_llamacpp_first">选择 llama.cpp 版本后显示</div>
         </div>
-        <label class="form-label" for="benchMainGpuSelect" style="font-size:13px;margin-top:4px;">主要 GPU</label>
-        <small class="form-text">设置 llama-bench 使用的主 GPU（--main-gpu）</small>
+        <label class="form-label" for="benchMainGpuSelect" style="font-size:13px;margin-top:4px;" data-i18n="page.benchmark_v3.main_gpu">主要 GPU</label>
+        <small class="form-text" data-i18n="page.benchmark_v3.main_gpu_desc">设置 llama-bench 使用的主 GPU（--main-gpu）</small>
         <select id="benchMainGpuSelect" class="form-control" style="margin-top:2px;">
-          <option value="-1">默认</option>
+          <option value="-1" data-i18n="common.default">默认</option>
         </select>
       </div>
       <div id="benchParamsContainer" style="overflow-y:auto;min-height:0;padding:14px 18px 14px 6px;">
-        <div style="text-align:center;padding:24px;font-size:12px;color:var(--text-secondary);">加载参数中…</div>
+        <div style="text-align:center;padding:24px;font-size:12px;color:var(--text-secondary);" data-i18n="page.benchmark_v3.loading_params">加载参数中…</div>
       </div>
     </div>
     <div class="bench-modal-footer">
-      <button id="benchParamsConfirmBtn" class="btn btn-primary" style="font-size:13px;">确认</button>
+      <button id="benchParamsConfirmBtn" class="btn btn-primary" data-i18n="common.confirm" style="font-size:13px;">确认</button>
     </div>
   </div>
 </div>

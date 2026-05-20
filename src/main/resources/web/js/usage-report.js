@@ -75,13 +75,13 @@
       let draftHtml = '';
       if (m.totalDraftTokens > 0) {
         const draftPct = m.totalDraftTokens > 0 ? ((m.totalDraftAccepted || 0) / m.totalDraftTokens * 100).toFixed(1) : '0.0';
-        draftHtml = '<span class="tk-draft">投机 ' + (m.totalDraftAccepted || 0) + '/' + m.totalDraftTokens + ' (' + draftPct + '%)</span>';
+        draftHtml = '<span class="tk-draft">' + t('report.draft_label', '投机') + ' ' + (m.totalDraftAccepted || 0) + '/' + m.totalDraftTokens + ' (' + draftPct + '%)</span>';
       }
       cardHtml += '<div class="token-card">'
         + '<div class="tk-model">' + escapeHtml(m.modelId || '') + '</div>'
         + '<div class="tk-tokens">'
-        + '<span>输入 ' + (m.totalPromptTokens || 0).toLocaleString() + '</span>'
-        + '<span>输出 ' + (m.totalPredictedTokens || 0).toLocaleString() + '</span>'
+        + '<span>' + t('report.prompt_label', '输入') + ' ' + (m.totalPromptTokens || 0).toLocaleString() + '</span>'
+        + '<span>' + t('report.output_label', '输出') + ' ' + (m.totalPredictedTokens || 0).toLocaleString() + '</span>'
         + '<span class="tk-cache">' + t('report.cache_label', '缓存') + ' ' + (m.totalCacheTokens || 0).toLocaleString() + '</span>'
         + draftHtml
         + '</div>'

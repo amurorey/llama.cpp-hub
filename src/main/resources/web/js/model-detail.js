@@ -102,7 +102,7 @@ function showModelDetailModal(model) {
                         `<button class="btn btn-primary" id="${modalId}KwargsApplyBtn">${t('common.apply', '应用')}</button>` +
                         `<button class="btn btn-secondary" id="${modalId}KwargsClearBtn">${t('common.clear', '清空')}</button>` +
                         `</div>` +
-                        `<textarea id="${modalId}KwargsTextarea" style="width:100%; height:calc(100% - 48px); font-family:monospace; font-size:14px; resize:none; padding:10px; border-radius:0.75rem; border:1px solid #d1d5db;" placeholder="请输入 JSON 内容..."></textarea>` +
+                        `<textarea id="${modalId}KwargsTextarea" style="width:100%; height:calc(100% - 48px); font-family:monospace; font-size:14px; resize:none; padding:10px; border-radius:0.75rem; border:1px solid #d1d5db;" placeholder="${t('modal.model_detail.kwargs.placeholder', '请输入 JSON 内容...')}"></textarea>` +
                         `</div>`;
 
     let slotsPanel = `<div id="${modalId}SlotsPanel" style="display:none; height:100%;">` +

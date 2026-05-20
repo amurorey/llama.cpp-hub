@@ -2924,8 +2924,8 @@
         return false;
       } finally {
         stateSaveInFlight = false;
-        if (saved && pendingStatePayload) {
-          void flushStateSave({ showErrorToast: false });
+        if (saved) {
+          pendingStatePayload = null;
         }
       }
     }
@@ -4355,6 +4355,9 @@
       if (assistantMessageIndex < conversation.messages.length) {
         const assistantMessage = conversation.messages[assistantMessageIndex];
         syncAssistantMessageState(assistantMessage);
+        assistantMessage.timings = null;
+        assistantMessage.performanceText = '';
+        assistantMessage.isStreaming = true;
         assistantMessage.responses.push(createAssistantResponseDraft({
           model: state.model || assistantMessage.model,
           isStreaming: true,

@@ -27,7 +27,7 @@
 
     async function fetchConsole() {
         const els = getEls();
-        if (els.status) els.status.textContent = '加载中...';
+        if (els.status) els.status.textContent = t('page.console.status.loading', '加载中...');
         snapshotInFlight = true;
         try {
             const res = await fetch('/api/sys/console');
@@ -38,11 +38,11 @@
             flushAppend();
             if (stay) scrollBottom(els.container);
             if (els.status) {
-                els.status.textContent = `已更新 · ${new Date().toLocaleTimeString()} · ${text.length}`;
+                els.status.textContent = t('page.console.status.updated', '已更新 · ') + new Date().toLocaleTimeString() + ' · ' + text.length;
             }
         } catch (e) {
             snapshotInFlight = false;
-            if (els.status) els.status.textContent = '加载失败';
+            if (els.status) els.status.textContent = t('page.console.status.load_failed', '加载失败');
         }
     }
 

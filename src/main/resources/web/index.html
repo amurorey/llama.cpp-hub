@@ -937,7 +937,7 @@
                                         <div id="updateProgressArea" style="display:none;">
                                             <div class="update-progress-card">
                                                 <div class="update-progress-header">
-                                                    <span id="updateProgressText" class="update-progress-text">准备下载...</span>
+                                                    <span id="updateProgressText" class="update-progress-text" data-i18n="page.settings.update.progress.preparing">page.settings.update.progress.preparing</span>
                                                     <span id="updateProgressPercent" class="update-progress-percent">0%</span>
                                                 </div>
                                                 <div class="update-progress-bar-outer">
@@ -949,7 +949,7 @@
                                                 </div>
                                                 <div class="update-progress-actions">
                                                     <button class="btn btn-secondary btn-sm" id="updateCancelBtn" onclick="cancelUpdateDownload()">
-                                                        <i class="fas fa-times"></i> 取消
+                                                        <i class="fas fa-times"></i> <span data-i18n="common.cancel">common.cancel</span>
                                                     </button>
                                                 </div>
                                             </div>
@@ -1265,7 +1265,7 @@
                 <div class="report-filter">
                     <label data-i18n="page.usage_report.filter_label">page.usage_report.filter_label</label>
                     <select id="requestLogModelFilter" onchange="UsageReport.filterByModel()">
-                        <option value="">全部</option>
+                        <option value="" data-i18n="page.usage_report.filter.all">page.usage_report.filter.all</option>
                     </select>
                     <span style="flex:1"></span>
                     <div class="report-pagination">
@@ -2399,7 +2399,7 @@
                             html += '<div class="form-group param-field">';
                             html += labelHtml;
                             html += `<div style="display:flex; gap:8px; align-items:stretch;">`;
-                            html += `<input type="text" class="form-control" id="${fieldId}" name="${fieldName}" value="${defaultValue}" style="flex:1;" placeholder="草稿模型 .gguf 文件路径">`;
+                            html += `<input type="text" class="form-control" id="${fieldId}" name="${fieldName}" value="${defaultValue}" style="flex:1;" placeholder="${t('modal.model_action.param.draft_model_placeholder', '草稿模型 .gguf 文件路径')}">`;
                             html += `<button type="button" class="btn btn-secondary btn-sm" onclick="openFileBrowser('${fieldId}')" style="flex-shrink:0;" title="浏览文件"><i class="fas fa-folder-open"></i></button>`;
                             html += `</div>`;
                             html += '</div>';
@@ -2988,7 +2988,7 @@
             var suffix = id ? '-' + id : '';
             var statusEl = document.getElementById('fastfetchStatusText' + suffix);
             var contentEl = document.getElementById('fastfetchContent' + suffix);
-            if (statusEl) statusEl.textContent = '加载中...';
+            if (statusEl) statusEl.textContent = t('page.fastfetch.status.loading', '加载中...');
             var url = '/api/sys/fastfetch';
             if (nodeId) url += '?nodeId=' + encodeURIComponent(nodeId);
             fetch(url)
@@ -3000,19 +3000,19 @@
                     var available = data && data.data && data.data.available;
                     if (contentEl) {
                         if (!available || error) {
-                            contentEl.textContent = 'Fastfetch 不可用: ' + (error || 'unknown error');
+                            contentEl.textContent = t('page.fastfetch.status.unavailable', 'Fastfetch 不可用: ') + (error || 'unknown error');
                         } else if (raw) {
                             contentEl.textContent = raw;
                         } else {
-                            contentEl.textContent = '(无输出)';
+                            contentEl.textContent = t('page.fastfetch.status.no_output', '(无输出)');
                         }
                     }
-                    if (statusEl) statusEl.textContent = '已更新 · ' + timestamp;
+                    if (statusEl) statusEl.textContent = t('page.fastfetch.status.updated', '已更新 \u00b7 ') + timestamp;
                 })
                 .catch(e => {
-                    if (statusEl) statusEl.textContent = '加载失败';
+                    if (statusEl) statusEl.textContent = t('page.fastfetch.status.load_failed', '加载失败');
                     if (contentEl) {
-                        contentEl.textContent = '错误: 无法获取系统信息 - ' + e.message;
+                        contentEl.textContent = t('page.fastfetch.status.error_prefix', '错误: 无法获取系统信息 - ') + e.message;
                     }
                 });
         }
@@ -3022,7 +3022,7 @@
             var suffix = id ? '-' + id : '';
             var statusEl = document.getElementById('gpuStatusText' + suffix);
             var container = document.getElementById('gpuContent' + suffix);
-            if (statusEl) statusEl.textContent = '加载中...';
+            if (statusEl) statusEl.textContent = t('page.fastfetch.status.loading', '加载中...');
             var url = '/api/sys/gpu/status';
             if (nodeId) url += '?nodeId=' + encodeURIComponent(nodeId);
             fetch(url)
@@ -3032,17 +3032,17 @@
                     var gpuData = data && data.data;
                     if (container) {
                         if (!gpuData) {
-                            container.innerHTML = '<div class="gpu-empty">获取GPU状态失败</div>';
+                            container.innerHTML = '<div class="gpu-empty">' + t('page.fastfetch.status.gpu_fetch_failed', '获取GPU状态失败') + '</div>';
                         } else {
                             container.innerHTML = renderGpuStatus(gpuData);
                         }
                     }
-                    if (statusEl) statusEl.textContent = '已更新 · ' + timestamp;
+                    if (statusEl) statusEl.textContent = t('page.fastfetch.status.updated', '已更新 \u00b7 ') + timestamp;
                 })
                 .catch(e => {
-                    if (statusEl) statusEl.textContent = '加载失败';
+                    if (statusEl) statusEl.textContent = t('page.fastfetch.status.load_failed', '加载失败');
                     if (container) {
-                        container.innerHTML = '<div class="gpu-empty">错误: 无法获取GPU状态 - ' + e.message + '</div>';
+                        container.innerHTML = '<div class="gpu-empty">' + t('page.fastfetch.status.gpu_error_prefix', '错误: 无法获取GPU状态 - ') + e.message + '</div>';
                     }
                 });
         }
@@ -3052,7 +3052,7 @@
             var amd = d['amd-smi'] || {};
             var hasAny = nvidia.available || amd.available;
             if (!hasAny) {
-                return '<div class="gpu-empty">未检测到支持的 GPU（nvidia-smi / amd-smi 均不可用）</div>';
+                return '<div class="gpu-empty">' + t('page.fastfetch.status.no_gpu_detected', '未检测到支持的 GPU（nvidia-smi / amd-smi 均不可用）') + '</div>';
             }
             var html = '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">OS: ' + escapeHtml(d.os || 'unknown') + '</div>';
             if (nvidia) {

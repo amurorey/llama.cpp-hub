@@ -22,7 +22,7 @@
     }
 
     async function fetchConsole() {
-        if (consoleStatusText) consoleStatusText.textContent = '加载中...';
+        if (consoleStatusText) consoleStatusText.textContent = t('page.console.status.loading', '加载中...');
         snapshotInFlight = true;
         try {
             const res = await fetch('/api/sys/console');
@@ -33,11 +33,11 @@
             flushPendingLogs();
             if (atBottom) scrollBottom();
             if (consoleStatusText) {
-                consoleStatusText.textContent = '已更新 · ' + new Date().toLocaleTimeString() + ' · Size: ' + text.length;
+                consoleStatusText.textContent = t('page.console.status.updated', '已更新 · ') + new Date().toLocaleTimeString() + ' · Size: ' + text.length;
             }
         } catch (e) {
             snapshotInFlight = false;
-            if (consoleStatusText) consoleStatusText.textContent = '加载失败';
+            if (consoleStatusText) consoleStatusText.textContent = t('page.console.status.load_failed', '加载失败');
         }
     }
 
