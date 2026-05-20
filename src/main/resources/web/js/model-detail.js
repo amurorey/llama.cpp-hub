@@ -61,7 +61,7 @@ function showModelDetailModal(model) {
                     `</div>` +
                     `</div>`;
     let samplingPanel = `<div id="${modalId}SamplingPanel" style="display:none; height:100%; overflow:auto; font-size: 12px; ">` +
-                        `<div style="padding:10px 12px; border-radius:0.75rem; background:#f3f4f6; color:#111827; line-height:1.7; margin-bottom:12px;">` +
+                        `<div style="padding:10px 12px; border-radius:0.75rem; background:var(--disabled-bg); color:var(--text-primary); line-height:1.7; margin-bottom:12px;">` +
                         `${t('modal.model_detail.sampling.desc', '开启该功能后，将强制使用指定的采样配置，而忽略其它客户端中的采样。比如你在这里强制设置温度为1.0，而在openwebui中设置温度为0.7，此时llamacpp将忽略0.7，使用1.0。这个功能的意义是为了快速切换采样来变更模型的工作模式，比如Qwen3.5，它对采样的敏感度非常高，而且有多种采样搭配，为了避免反复修改采样配置，在这里设置并切换更加方便。')}` +
                         `</div>` +
                         `<div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">` +
@@ -86,14 +86,14 @@ function showModelDetailModal(model) {
     let tokenPanel = `<div id="${modalId}TokenPanel" style="display:none; height:100%;">` +
                         `<div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">` +
                         `<button class="btn btn-primary" id="${modalId}TokenCalcBtn">${t('modal.model_detail.token.calc', '生成 prompt 并计算 tokens')}</button>` +
-                        `<div style="margin-left:auto; font-size:13px; color:#374151;">${t('modal.model_detail.token.tokens', 'tokens')}: <strong id="${modalId}TokenCount">-</strong></div>` +
+                        `<div style="margin-left:auto; font-size:13px; color:var(--text-primary);">${t('modal.model_detail.token.tokens', 'tokens')}: <strong id="${modalId}TokenCount">-</strong></div>` +
                         `</div>` +
                         `<div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; height:calc(100% - 48px); min-height:0;">` +
                             `<div style="display:flex; flex-direction:column; min-height:0;">` +
                                 `<textarea class="form-control" id="${modalId}TokenInput" rows="12" placeholder="${escapeAttrCompat(t('modal.model_detail.token.input_placeholder', '输入要计算的文本...'))}" style="flex:1; min-height:0; resize:none;"></textarea>` +
                             `</div>` +
                             `<div style="display:flex; flex-direction:column; min-height:0;">` +
-                                `<textarea class="form-control" id="${modalId}TokenPromptOutput" rows="12" readonly style="flex:1; min-height:0; resize:none; background:#f9fafb;"></textarea>` +
+                                `<textarea class="form-control" id="${modalId}TokenPromptOutput" rows="12" readonly style="flex:1; min-height:0; resize:none; background:var(--input-bg);"></textarea>` +
                             `</div>` +
                    `</div>` +
                 `</div>`;
@@ -102,7 +102,7 @@ function showModelDetailModal(model) {
                         `<button class="btn btn-primary" id="${modalId}KwargsApplyBtn">${t('common.apply', '应用')}</button>` +
                         `<button class="btn btn-secondary" id="${modalId}KwargsClearBtn">${t('common.clear', '清空')}</button>` +
                         `</div>` +
-                        `<textarea id="${modalId}KwargsTextarea" style="width:100%; height:calc(100% - 48px); font-family:monospace; font-size:14px; resize:none; padding:10px; border-radius:0.75rem; border:1px solid #d1d5db;" placeholder="${t('modal.model_detail.kwargs.placeholder', '请输入 JSON 内容...')}"></textarea>` +
+                        `<textarea id="${modalId}KwargsTextarea" style="width:100%; height:calc(100% - 48px); font-family:monospace; font-size:14px; resize:none; padding:10px; border-radius:0.75rem; border:1px solid var(--border-color); background:var(--input-bg); color:var(--text-primary);" placeholder="${t('modal.model_detail.kwargs.placeholder', '请输入 JSON 内容...')}"></textarea>` +
                         `</div>`;
 
     let slotsPanel = `<div id="${modalId}SlotsPanel" style="display:none; height:100%;">` +
@@ -860,7 +860,7 @@ function loadModelSamplingSettings() {
     const select = document.getElementById(modalId + 'SamplingConfigSelect');
     const details = document.getElementById(modalId + 'SamplingDetails');
     if (!modelId || !select || !details) return;
-    details.innerHTML = `<div style="grid-column:1 / -1; padding:12px; border:1px solid #e5e7eb; border-radius:0.75rem; color:#6b7280;">${escapeAttrCompat(t('common.loading', '加载中...'))}</div>`;
+    details.innerHTML = `<div style="grid-column:1 / -1; padding:12px; border:1px solid var(--border-color); border-radius:0.75rem; color:var(--text-secondary);">${escapeAttrCompat(t('common.loading', '加载中...'))}</div>`;
     const nodeId = window.__modelDetailNodeId || '';
     const nodeParam = (nodeId && nodeId !== 'local') ? `&nodeId=${encodeURIComponent(nodeId)}` : '';
     const configReq = fetch(`/api/sys/model/sampling/setting/list${nodeParam ? '?' + nodeParam.substring(1) : ''}`).then(r => r.json());

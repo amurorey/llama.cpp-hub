@@ -901,7 +901,7 @@ function openAvatarViewer(url) {
   closeBtn.style.height = '34px';
   closeBtn.style.borderRadius = '12px';
   closeBtn.style.border = '1px solid var(--border)';
-  closeBtn.style.background = '#ffffff';
+  closeBtn.style.background = 'var(--surface)';
   closeBtn.style.color = 'var(--text)';
   closeBtn.style.cursor = 'pointer';
   closeBtn.style.lineHeight = '1';
@@ -1044,7 +1044,7 @@ function openHtmlPreview(html) {
   card.style.flexDirection = 'column';
   card.style.border = 'none';
   card.style.borderRadius = '0';
-  card.style.background = '#ffffff';
+  card.style.background = 'var(--surface)';
   card.style.boxShadow = 'none';
   const head = document.createElement('div');
   head.style.display = 'flex';
@@ -1053,7 +1053,7 @@ function openHtmlPreview(html) {
   head.style.gap = '10px';
   head.style.padding = '10px 12px';
   head.style.borderBottom = '1px solid var(--border)';
-  head.style.background = '#f9fafb';
+  head.style.background = 'var(--panel-2)';
   const title = document.createElement('div');
   title.textContent = t('page.chat.completion.modal.html_preview.title', 'HTML预览');
   title.style.fontWeight = '800';

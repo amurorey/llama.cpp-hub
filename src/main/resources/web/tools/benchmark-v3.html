@@ -57,7 +57,7 @@
     /* Form controls */
     .form-control { width:100%; padding:5px 8px; border:1px solid var(--border-color); border-radius:6px; font-size:12px; font-family:inherit; background:var(--card-bg); color:var(--text-primary); box-sizing:border-box; }
     .form-control:focus { outline:none; border-color:rgba(99,102,241,0.5); }
-    .form-control:disabled { opacity:0.5; cursor:not-allowed; }
+    .form-control:disabled { opacity:0.5; cursor:not-allowed; background-color:var(--disabled-bg); }
 
     /* Actions bar */
     .bench-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; flex-shrink:0; }
@@ -207,6 +207,15 @@
     @media (max-width:960px) {
       .tab-panel.active { grid-template-columns:1fr; }
     }
+    [data-theme="dark"] #benchParamsModal .param-field:has(.param-enable-toggle:not(:checked)) .form-label,
+    [data-theme="dark"] #benchParamsModal .param-field:has(.param-enable-toggle:not(:checked)) .form-text {
+        color: var(--text-secondary);
+    }
+    [data-theme="dark"] #benchParamsModal .param-field:has(.param-enable-toggle:not(:checked)) .form-control {
+        background: var(--disabled-bg);
+        border-color: var(--border-color);
+        color: var(--text-secondary);
+    }
   </style>
 </head>
 <body>
@@ -254,7 +263,7 @@
         <div class="card shrink">
           <div class="bench-actions">
             <button id="runBenchBtn" class="btn btn-primary" data-i18n="page.benchmark_v3.run" style="font-size:12px;">运行</button>
-            <button id="benchParamsBtn" class="btn" data-i18n="page.benchmark_v3.params_settings" style="font-size:12px;">参数设置</button>
+            <button id="benchParamsBtn" class="btn btn-secondary" data-i18n="page.benchmark_v3.params_settings" style="font-size:12px;">参数设置</button>
           </div>
         </div>
 

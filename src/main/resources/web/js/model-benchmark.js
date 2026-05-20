@@ -23,7 +23,7 @@ function openModelBenchmarkDialog(modelId, modelName) {
                             <div id="benchmarkBasicParamsContainer">
                                 <div class="form-group">
                                     <label class="form-label">${t('modal.model_benchmark.form.model', '模型')}</label>
-                                    <div class="form-control" id="benchmarkModelName" style="background-color: #f3f4f6;"></div>
+                                    <div class="form-control" id="benchmarkModelName" style="background-color: var(--disabled-bg);"></div>
                                 </div>
 
                                 <div class="form-group">
@@ -516,11 +516,11 @@ function openModelBenchmarkList(modelId, modelName) {
             ? 'display:flex; flex-direction:column; gap:12px; flex:1; min-height:0;'
             : 'display:flex; gap:16px; height:60vh;';
         const sidebarStyle = isMobileView
-            ? 'border:1px solid #e5e7eb; border-radius:0.75rem; overflow:hidden; background:#f9fafb; flex:1; min-height:0;'
-            : 'width:25%; border:1px solid #e5e7eb; border-radius:0.75rem; overflow:hidden; background:#f9fafb;';
+            ? 'border:1px solid var(--border-color); border-radius:0.75rem; overflow:hidden; background:var(--card-bg); flex:1; min-height:0;'
+            : 'width:25%; border:1px solid var(--border-color); border-radius:0.75rem; overflow:hidden; background:var(--card-bg);';
         const listStyle = isMobileView
-            ? 'flex:1; min-height:0; overflow:auto; font-size:13px; color:#374151;'
-            : 'max-height:calc(60vh - 36px); overflow:auto; font-size:13px; color:#374151;';
+            ? 'flex:1; min-height:0; overflow:auto; font-size:13px; color:var(--text-primary);'
+            : 'max-height:calc(60vh - 36px); overflow:auto; font-size:13px; color:var(--text-primary);';
         const preStyle = isMobileView
             ? 'flex:1; min-height:0; overflow:auto; font-size:13px; background:#111827; color:#e5e7eb; padding:10px; border-radius:0.75rem;'
             : 'flex:1; max-height:calc(60vh - 36px); overflow:auto; font-size:13px; background:#111827; color:#e5e7eb; padding:10px; border-radius:0.75rem;';
@@ -537,12 +537,12 @@ function openModelBenchmarkList(modelId, modelName) {
                 <div class="modal-body">
                     <div style="${layoutStyle}">
                         <div style="${sidebarStyle}">
-                            <div style="padding:8px 10px; border-bottom:1px solid #e5e7eb; font-size:13px; color:#374151;">${t('modal.model_benchmark.results_compare.files', '测试结果文件')}</div>
+                            <div style="padding:8px 10px; border-bottom:1px solid var(--border-color); font-size:13px; color:var(--text-primary);">${t('modal.model_benchmark.results_compare.files', '测试结果文件')}</div>
                             <div id="${modalId}List" style="${listStyle}">${t('common.loading', '加载中...')}</div>
                         </div>
                         <div style="flex:1; display:flex; flex-direction:column; min-width:0;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                                <div id="${modalId}ModelInfo" style="font-size:14px; color:#374151;"></div>
+                                <div id="${modalId}ModelInfo" style="font-size:14px; color:var(--text-primary);"></div>
                                 <div>
                                     <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="clearBenchmarkResultContent()">${t('modal.model_benchmark.results_compare.clear', '清空内容')}</button>
                                 </div>
@@ -576,21 +576,21 @@ function openModelBenchmarkList(modelId, modelName) {
             }
             const files = (d.data && d.data.files) ? d.data.files : [];
             if (!files.length) {
-                listEl.innerHTML = `<div style="color:#666; padding:8px 10px;">${t('modal.model_benchmark.results_compare.no_files', '未找到测试结果文件')}</div>`;
+                listEl.innerHTML = `<div style="color:var(--text-secondary); padding:8px 10px;">${t('modal.model_benchmark.results_compare.no_files', '未找到测试结果文件')}</div>`;
                 return;
             }
-            let html = '<div style="border-top:1px solid #e5e7eb;">';
+            let html = '<div style="border-top:1px solid var(--border-color);">';
             files.forEach(item => {
                 const fn = typeof item === 'string' ? item : (item && item.name) ? item.name : '';
                 const size = (item && typeof item === 'object' && item.size != null) ? item.size : null;
                 const modified = (item && typeof item === 'object' && item.modified) ? item.modified : '';
                 const sizeText = size != null ? (typeof formatFileSize === 'function' ? formatFileSize(size) : (size + ' B')) : '';
                 html += `
-                    <div class="list-row" style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid #e5e7eb; background:#f9fafb;">
+                    <div class="list-row" style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border-bottom:1px solid var(--border-color); background:var(--card-bg);">
                         <div style="display:flex; flex-direction:column; gap:4px; max-width:65%;">
                             <span style="word-break:break-all;"><i class="fas fa-file-alt" style="margin-right:6px;"></i>${fn}</span>
-                            <span style="color:#6b7280; font-size:12px;">${t('modal.model_benchmark.results_compare.modified_time', '修改时间: ')}${modified || '-'}</span>
-                            <span style="color:#6b7280; font-size:12px;">${t('modal.model_benchmark.results_compare.size', '大小: ')}${sizeText || '-'}</span>
+                            <span style="color:var(--text-secondary); font-size:12px;">${t('modal.model_benchmark.results_compare.modified_time', '修改时间: ')}${modified || '-'}</span>
+                            <span style="color:var(--text-secondary); font-size:12px;">${t('modal.model_benchmark.results_compare.size', '大小: ')}${sizeText || '-'}</span>
                         </div>
                         <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-end;">
                             <button class="btn btn-primary" style="padding:2px 10px; font-size:12px;" onclick="loadBenchmarkResult(this.dataset.fn)" data-fn="${fn}">${t('modal.model_benchmark.results_compare.append', '追加')}</button>
