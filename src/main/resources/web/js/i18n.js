@@ -74,8 +74,13 @@
             if (!key) return;
             const attr = node.getAttribute('data-i18n-attr');
             if (attr) {
-                const current = node.getAttribute(attr) || '';
-                node.setAttribute(attr, translate(bundle, key, current));
+                const attrs = attr.split(',').map(a => a.trim());
+                for (const a of attrs) {
+                    if (a) {
+                        const current = node.getAttribute(a) || '';
+                        node.setAttribute(a, translate(bundle, key, current));
+                    }
+                }
                 return;
             }
             const currentText = node.textContent || '';
