@@ -1022,6 +1022,9 @@ public class LlamaServerManager {
 				return;
 			}
 			int port = this.getNextAvailablePort();
+			String allArgs = (cmd == null ? "" : cmd.trim()) + (extraParams == null ? "" : " " + extraParams.trim());
+			Integer clientPort = cmdHasFlag(allArgs, "--port") ? extractPortFromCmd(allArgs) : null;
+			int actualPort = clientPort != null ? clientPort : port;
 			String commandStr = this.buildCommandStr(targetModel, port, llamaBinPath, device, mg, enableVision, cmd, extraParams, chatTemplateFilePath);
 			String processName = "llama-server-" + modelId;
 			LlamaCppProcess process = new LlamaCppProcess(processName, commandStr, llamaBinPath);
@@ -1088,7 +1091,7 @@ public class LlamaServerManager {
 				process.stop();
 				return;
 			}
-			LlamaServer.sendModelLoadStartEvent(modelId, port, "模型启动中");
+			LlamaServer.sendModelLoadStartEvent(modelId, actualPort, "模型启动中");
 
 			try {
 				boolean timeout = !latch.await(10, TimeUnit.MINUTES);
@@ -1109,9 +1112,9 @@ public class LlamaServerManager {
 				if (loadSuccess.get()) {
 					synchronized (this.processLock) {
 						this.loadedProcesses.put(modelId, process);
-						this.modelPorts.put(modelId, port);
+						this.modelPorts.put(modelId, actualPort);
 					}
-					LlamaServer.sendModelLoadEvent(modelId, true, "模型加载成功", port);
+					LlamaServer.sendModelLoadEvent(modelId, true, "模型加载成功", actualPort);
 //					// 这里请求一次
 //					try {
 //						JsonObject slotsResponse = this.handleModelSlotsGet(modelId);
@@ -1211,6 +1214,21 @@ public class LlamaServerManager {
 			|| (lower.contains("error") && lower.contains("context"));
 	}
 	
+	private static Integer extractPortFromCmd(String cmd) {
+		if (cmd == null || cmd.trim().isEmpty()) {
+			return null;
+		}
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("--port[=\\s]+(\\d+)").matcher(cmd);
+		if (m.find()) {
+			try {
+				return Integer.parseInt(m.group(1));
+			} catch (NumberFormatException e) {
+				return null;
+			}
+		}
+		return null;
+	}
+
 	/**
 	 * 	
 	 * @param targetModel
@@ -1240,8 +1258,10 @@ public class LlamaServerManager {
 		String modelFile = Paths.get(targetModel.getPath(), targetModel.getPrimaryModel().getFileName()).toString();
 		sb.append(ParamTool.quoteIfNeeded(modelFile));
 
-		sb.append(" --port ");
-		sb.append(port);
+		if (!cmdHasFlag(allArgs, "--port")) {
+			sb.append(" --port ");
+			sb.append(port);
+		}
 		
 		//	确认启用视觉
 		if(enableVision) {

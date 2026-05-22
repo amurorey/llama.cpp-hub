@@ -305,6 +305,19 @@
     "groupCollapsed": false
   },
   {
+    "name": "param.server.port.name",
+    "fullName": "--port",
+    "abbreviation": "--port",
+    "type": "INTEGER",
+    "defaultValue": "0",
+    "description": "param.server.port.desc",
+    "sort": 20,
+	"defaultEnabled": false,
+    "group": "page.params.group.basic",
+    "groupOrder": 10,
+    "groupCollapsed": false
+  },
+  {
     "name": "param.server.cache_ram.name",
     "fullName": "--cache-ram",
     "abbreviation": "-cram",
@@ -615,6 +628,32 @@
     "defaultValue": "0",
     "description": "param.server.no_mmproj_offload.desc",
     "sort": 32,
+	"defaultEnabled": false,
+    "group": "page.params.group.multimodal",
+    "groupOrder": 60,
+    "groupCollapsed": true
+  },
+  {
+    "name": "param.server.image_min_tokens.name",
+    "fullName": "--image-min-tokens",
+    "abbreviation": "--image-min-tokens",
+    "type": "INTEGER",
+    "defaultValue": "0",
+    "description": "param.server.image_min_tokens.desc",
+    "sort": 33,
+	"defaultEnabled": false,
+    "group": "page.params.group.multimodal",
+    "groupOrder": 60,
+    "groupCollapsed": true
+  },
+  {
+    "name": "param.server.image_max_tokens.name",
+    "fullName": "--image-max-tokens",
+    "abbreviation": "--image-max-tokens",
+    "type": "INTEGER",
+    "defaultValue": "0",
+    "description": "param.server.image_max_tokens.desc",
+    "sort": 34,
 	"defaultEnabled": false,
     "group": "page.params.group.multimodal",
     "groupOrder": 60,
