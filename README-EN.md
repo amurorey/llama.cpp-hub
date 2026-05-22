@@ -168,6 +168,23 @@ Auto-check GitHub Release → download the update package → unzip and replace.
 
 ---
 
+### Multimodal
+
+By default, the app auto-detects mmproj files in the same directory as the GGUF file (e.g., `Qwen3.6-27B/Qwen3.6-27B.gguf` will look for mmproj in the same directory). If found, the frontend marks the model as multimodal with vision capabilities.
+
+However, if you have multiple fine-tuned variants sharing the same architecture (e.g., `Qwen3.6-27B-PowerEdition.gguf`), they can reuse the same mmproj file. The "same directory" approach would require copying the mmproj for each variant. That's why there's an additional mmproj picker in the load parameters — you can point to any mmproj file manually.
+
+### MTP: A Quick Explainer
+
+llama.cpp lets you do Multi-Token Prediction in two ways:
+
+1. **Models with MTP layers baked in** — load and go, zero fuss
+2. **Loading MTP layers separately** — point the "draft model" parameter at a standalone GGUF file containing only MTP layer weights
+
+Why bother with option 2? Because most fine-tune authors don't bother quantizing MTP-enabled versions. So if you want MTP on your favorite shiny variant, you'll have to extract the layers from the original and load them alongside. Whether a variant + original MTP layers actually plays nice together? High-quality answer: beats me.
+
+---
+
 ## Guide: Model Paths
 
 1. By default, the program auto-scans the `models/` directory at the root — no need to add it manually
