@@ -189,6 +189,12 @@ public class AnthropicService {
         }
         
         if (!manager.getLoadedProcesses().containsKey(modelName)) {
+            String resolved = manager.findModelIdByAlias(modelName);
+            if (resolved != null) {
+                modelName = resolved;
+            }
+        }
+        if (!manager.getLoadedProcesses().containsKey(modelName)) {
             if (manager.getLoadedProcesses().size() == 1) {
                 modelName = manager.getFirstModelName();
             } else {
@@ -270,6 +276,12 @@ public class AnthropicService {
             } catch (Exception ignore) {}
         }
 
+        if (!manager.getLoadedProcesses().containsKey(modelName)) {
+            String resolved = manager.findModelIdByAlias(modelName);
+            if (resolved != null) {
+                modelName = resolved;
+            }
+        }
         if (manager.getLoadedProcesses().containsKey(modelName)) {
             Integer port = manager.getModelPort(modelName);
             if (port == null) {
@@ -339,6 +351,12 @@ public class AnthropicService {
             }
         }
 
+        if (!manager.getLoadedProcesses().containsKey(modelName)) {
+            String resolved = manager.findModelIdByAlias(modelName);
+            if (resolved != null) {
+                modelName = resolved;
+            }
+        }
         if (!manager.getLoadedProcesses().containsKey(modelName)) {
             if (manager.getLoadedProcesses().size() == 1) {
                 modelName = manager.getFirstModelName();

@@ -109,8 +109,15 @@ public class OllamaEmbedService {
 			logger.info("[OllamaEmbed路由] 请求体指定 nodeId，直接路由远程节点: nodeId={}, model={}", nodeId, modelName);
 		} else {
 			LlamaServerManager manager = LlamaServerManager.getInstance();
-			if (manager.getLoadedProcesses().containsKey(modelName)) {
-				Integer port = manager.getModelPort(modelName);
+			String lookupName = modelName;
+			if (!manager.getLoadedProcesses().containsKey(lookupName)) {
+				String resolved = manager.findModelIdByAlias(lookupName);
+				if (resolved != null) {
+					lookupName = resolved;
+				}
+			}
+			if (manager.getLoadedProcesses().containsKey(lookupName)) {
+				Integer port = manager.getModelPort(lookupName);
 				if (port != null) {
 					targetUrl = String.format("http://localhost:%d/v1/embeddings", port.intValue());
 				}

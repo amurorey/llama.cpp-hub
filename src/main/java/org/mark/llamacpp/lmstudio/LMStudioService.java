@@ -229,6 +229,12 @@ public class LMStudioService {
 			
 			// 检查模型是否已加载
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
+			}
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
 				return;
 			}
@@ -278,6 +284,12 @@ public class LMStudioService {
 			}
 			
 			LlamaServerManager manager = LlamaServerManager.getInstance();
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
+			}
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
 				return;

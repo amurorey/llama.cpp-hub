@@ -270,6 +270,12 @@ public class ChatStreamSession {
 		try {
 			LlamaServerManager manager = LlamaServerManager.getInstance();
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
+			}
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				logger.info("[Node路由] 本地模型未加载: model={}, loadedModels={}", modelName, manager.getLoadedProcesses().keySet());
 				return null;
 			}

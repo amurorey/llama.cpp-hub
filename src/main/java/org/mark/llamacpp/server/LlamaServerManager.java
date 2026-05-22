@@ -828,6 +828,31 @@ public class LlamaServerManager {
 	}
 	
 	/**
+	 * 通过别名查找对应的 modelId
+	 * @param name 别名（可能含 @ 后缀）
+	 * @return 匹配的 modelId，未找到返回 null
+	 */
+	public String findModelIdByAlias(String name) {
+		if (name == null || name.isBlank()) {
+			return null;
+		}
+		String trimmed = name.trim();
+		String base = trimmed;
+		int at = base.indexOf('@');
+		if (at > 0) {
+			base = base.substring(0, at);
+		}
+		for (GGUFModel m : this.list) {
+			if (m == null) continue;
+			String alias = m.getAlias();
+			if (alias != null && (alias.equals(trimmed) || alias.equals(base))) {
+				return m.getModelId();
+			}
+		}
+		return null;
+	}
+	
+	/**
 	 * 获取下一个可用端口
 	 * 使用PortChecker工具类检查端口是否真正可用
 	 * @return 下一个可用端口号

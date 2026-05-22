@@ -316,15 +316,23 @@ public class OpenAIService {
 				requestJson.remove("nodeId");
 				body = JsonUtil.toJson(requestJson);
 				NodeProxyService.getInstance().proxyStreamRequest(ctx, request, bodyNodeId, "v1/chat/completions", requestJson);
-			} else if (manager.getLoadedProcesses().containsKey(modelName)) {
-				Integer modelPort = manager.getModelPort(modelName);
-				if (modelPort == null) {
-					this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, "Model port not found: " + modelName, null);
-					return;
-				}
-				this.forwardRequestToLlamaCpp(ctx, request, modelName, modelPort, "/v1/chat/completions", isStream, body);
 			} else {
-				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
+				if (!manager.getLoadedProcesses().containsKey(modelName)) {
+					String resolved = manager.findModelIdByAlias(modelName);
+					if (resolved != null) {
+						modelName = resolved;
+					}
+				}
+				if (manager.getLoadedProcesses().containsKey(modelName)) {
+					Integer modelPort = manager.getModelPort(modelName);
+					if (modelPort == null) {
+						this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, "Model port not found: " + modelName, null);
+						return;
+					}
+					this.forwardRequestToLlamaCpp(ctx, request, modelName, modelPort, "/v1/chat/completions", isStream, body);
+				} else {
+					this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
+				}
 			}
 		} catch (Exception e) {
 			logger.info("处理OpenAI聊天补全请求时发生错误", e);
@@ -397,6 +405,12 @@ public class OpenAIService {
 
 			// 检查模型是否已加载
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
+			}
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
 				return;
 			}
@@ -450,6 +464,12 @@ public class OpenAIService {
 				modelName = requestJson.get("model").getAsString();
 			}
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
+			}
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
 				return;
 			}
@@ -492,6 +512,12 @@ public class OpenAIService {
 				}
 			} else {
 				modelName = requestJson.get("model").getAsString();
+			}
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
 			}
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
@@ -553,6 +579,12 @@ public class OpenAIService {
 				isStream = requestJson.get("stream").getAsBoolean();
 			}
 
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
+			}
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
 				return;
@@ -666,6 +698,12 @@ public class OpenAIService {
 			if (modelName == null || modelName.isBlank()) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "No models are currently loaded", "model");
 				return;
+			}
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
 			}
 			if (!manager.getLoadedProcesses().containsKey(modelName)) {
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
