@@ -1065,10 +1065,13 @@ public class LlamaServerManager {
 					if (info.unexpected) {
 						logger.warn("已加载的模型进程意外崩溃 (exitCode={}): {}", info.exitCode, modelId);
 						synchronized (this.processLock) {
+							boolean wasLoaded = this.loadedProcesses.containsKey(modelId);
 							this.loadedProcesses.remove(modelId);
 							this.modelPorts.remove(modelId);
+							if (wasLoaded) {
+								LlamaServer.sendModelStopEvent(modelId, false, "模型进程意外崩溃 (exitCode=" + info.exitCode + ")");
+							}
 						}
-						LlamaServer.sendModelStopEvent(modelId, false, "模型进程意外崩溃 (exitCode=" + info.exitCode + ")");
 					}
 				}
 			});
