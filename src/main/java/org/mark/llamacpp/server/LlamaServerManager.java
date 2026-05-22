@@ -1030,35 +1030,44 @@ public class LlamaServerManager {
 
 			CountDownLatch latch = new CountDownLatch(1);
 			AtomicBoolean loadSuccess = new AtomicBoolean(false);
+			AtomicBoolean latchResolved = new AtomicBoolean(false);
 
 			process.setOutputHandler(line -> {
 				LlamaServer.sendConsoleLineEvent(modelId, line);
 				if (line.contains("srv  update_slots: all slots are idle")) {
-					loadSuccess.set(true);
-					latch.countDown();
-				}
-				if (line.contains("main: exiting due to model loading error")) {
-					loadSuccess.set(false);
-					latch.countDown();
-				}
-				if (line.contains("Inferior") && line.contains("detached")) {
-					logger.info("检测到模型进程异常终止: {}", line);
-					loadSuccess.set(false);
-					synchronized (this.processLock) {
-						this.loadedProcesses.remove(modelId);
-						this.modelPorts.remove(modelId);
+					if (latchResolved.compareAndSet(false, true)) {
+						loadSuccess.set(true);
+						latch.countDown();
 					}
-					LlamaServer.sendModelStopEvent(modelId, false, "模型进程异常终止: " + line);
-					latch.countDown();
+					return;
 				}
-				if (line.startsWith("error")) {
-					logger.info("检测到模型进程异常终止: {}", line);
-					loadSuccess.set(false);
-					synchronized (this.processLock) {
-						this.loadedProcesses.remove(modelId);
-						this.modelPorts.remove(modelId);
+				String lower = line.toLowerCase(Locale.ROOT);
+				if (isModelErrorLine(lower)) {
+					logger.warn("检测到模型加载错误: {}", line);
+					if (latchResolved.compareAndSet(false, true)) {
+						loadSuccess.set(false);
+						latch.countDown();
 					}
-					latch.countDown();
+				}
+			});
+
+			process.setOnProcessExited(info -> {
+				logger.info("模型进程退出事件: modelId={}, exitCode={}, unexpected={}", modelId, info.exitCode, info.unexpected);
+				if (latchResolved.compareAndSet(false, true)) {
+					if (info.unexpected) {
+						logger.warn("模型进程意外退出 (exitCode={}): {}", info.exitCode, modelId);
+						loadSuccess.set(false);
+						latch.countDown();
+					}
+				} else {
+					if (info.unexpected) {
+						logger.warn("已加载的模型进程意外崩溃 (exitCode={}): {}", info.exitCode, modelId);
+						synchronized (this.processLock) {
+							this.loadedProcesses.remove(modelId);
+							this.modelPorts.remove(modelId);
+						}
+						LlamaServer.sendModelStopEvent(modelId, false, "模型进程意外崩溃 (exitCode=" + info.exitCode + ")");
+					}
 				}
 			});
 
@@ -1183,6 +1192,23 @@ public class LlamaServerManager {
 		synchronized (this.processLock) {
 			return this.canceledLoadingModels.contains(modelId);
 		}
+	}
+
+	private static boolean isModelErrorLine(String lower) {
+		return lower.contains("exiting due to model loading error")
+			|| lower.contains("failed to load model")
+			|| lower.contains("error: failed to load")
+			|| lower.contains("error: model loading")
+			|| (lower.contains("error") && lower.contains("gguf"))
+			|| lower.contains("segfault")
+			|| lower.contains("segmentation fault")
+			|| lower.contains("signal 11")
+			|| lower.contains("cannot allocate")
+			|| lower.contains("out of memory")
+			|| lower.contains("cuda error")
+			|| lower.contains("hip error")
+			|| (lower.contains("error") && lower.contains("initialize"))
+			|| (lower.contains("error") && lower.contains("context"));
 	}
 	
 	/**

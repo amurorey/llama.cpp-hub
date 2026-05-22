@@ -16,8 +16,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.slf4j.Logger;
@@ -48,9 +50,12 @@ public class LlamaCppProcess {
 	private Thread errorThread;
 	private final AtomicBoolean isRunning = new AtomicBoolean(false);
 	private Consumer<String> outputHandler;
+	private Consumer<ProcessExitInfo> onProcessExited;
 	private BufferedWriter stdwriter;
 	private int ctxSize;
 	private int slotNum;
+	private CompletableFuture<Void> exitFuture;
+	private final AtomicReference<ProcessExitInfo> exitInfoRef = new AtomicReference<>();
 
 	public LlamaCppProcess(String name, String cmd, String llamaBinPath) {
 		this.name = name;
@@ -64,6 +69,10 @@ public class LlamaCppProcess {
 
 	public void setOutputHandler(Consumer<String> outputHandler) {
 		this.outputHandler = outputHandler;
+	}
+
+	public void setOnProcessExited(Consumer<ProcessExitInfo> onProcessExited) {
+		this.onProcessExited = onProcessExited;
 	}
 
 	public void setCtxSize(int ctxSize) {
@@ -166,6 +175,7 @@ public class LlamaCppProcess {
 			}
 
 			this.isRunning.set(true);
+			this.exitFuture = new CompletableFuture<>();
 			this.startOutputReaders();
 			return true;
 
@@ -192,6 +202,14 @@ public class LlamaCppProcess {
 	public synchronized boolean stop() {
 		if (!this.isRunning.getAndSet(false)) {
 			return false;
+		}
+
+		// 标记为预期退出，防止 onReaderExit 误报为 crash
+		if (this.exitFuture != null && !this.exitFuture.isDone()) {
+			ProcessExitInfo info = new ProcessExitInfo();
+			info.unexpected = false;
+			this.exitInfoRef.set(info);
+			this.exitFuture.complete(null);
 		}
 
 		// 1. 关闭 stdin writer — 防止向已死进程写入时触发 SIGPIPE
@@ -428,6 +446,8 @@ public class LlamaCppProcess {
 				if (this.isRunning.get()) {
 					logger.warn("读取进程输出流时发生错误: {}", e.getMessage());
 				}
+			} finally {
+				onReaderExit();
 			}
 		});
 
@@ -441,8 +461,40 @@ public class LlamaCppProcess {
 				if (this.isRunning.get()) {
 					logger.warn("读取进程错误流时发生错误: {}", e.getMessage());
 				}
+			} finally {
+				onReaderExit();
 			}
 		});
+	}
+
+	/**
+	 * Called when either reader thread exits (EOF on stdout or stderr).
+	 * This means the process has exited. We trigger the exit callback once.
+	 */
+	private synchronized void onReaderExit() {
+		if (this.exitFuture != null && this.exitFuture.isDone()) {
+			return;
+		}
+		if (this.process == null || !this.process.isAlive()) {
+			ProcessExitInfo info = new ProcessExitInfo();
+			info.unexpected = !this.isRunning.get();
+			try {
+				info.exitCode = this.process.exitValue();
+			} catch (IllegalThreadStateException | IllegalArgumentException e) {
+				info.exitCode = -1;
+			}
+			this.exitInfoRef.set(info);
+			if (this.exitFuture != null) {
+				this.exitFuture.complete(null);
+			}
+			if (this.onProcessExited != null) {
+				try {
+					this.onProcessExited.accept(info);
+				} catch (Exception e) {
+					logger.error("onProcessExited 回调抛出异常: {}", e.getMessage());
+				}
+			}
+		}
 	}
 
 	// ========================================================================
@@ -474,6 +526,14 @@ public class LlamaCppProcess {
 			return this.process.exitValue();
 		}
 		return null;
+	}
+
+	public CompletableFuture<Void> getExitFuture() {
+		return this.exitFuture;
+	}
+
+	public ProcessExitInfo getExitInfo() {
+		return this.exitInfoRef.get();
 	}
 
 	// ========================================================================
@@ -569,5 +629,13 @@ public class LlamaCppProcess {
 	private static boolean isWindows() {
 		String os = System.getProperty("os.name");
 		return os != null && os.toLowerCase(Locale.ROOT).contains("win");
+	}
+
+	/**
+	 * Process exit information passed to the onProcessExited callback.
+	 */
+	public static class ProcessExitInfo {
+		public int exitCode = -1;
+		public boolean unexpected = true;
 	}
 }
