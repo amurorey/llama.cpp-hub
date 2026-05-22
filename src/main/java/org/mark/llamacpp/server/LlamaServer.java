@@ -225,6 +225,13 @@ public class LlamaServer {
 				}
 			}
 		}
+
+		// 阻塞主线程，等待主服务线程结束
+		try {
+			t1.join();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
 	}
 	
 	/**
@@ -1052,7 +1059,10 @@ public static String getDefaultModelsPath() {
             logger.info("服务器被中断", e);
             Thread.currentThread().interrupt();
         } catch (Exception e) {
-            logger.info("服务器启动失败", e);
+            logger.error("OpenAI服务启动失败，端口 {} 可能已被占用，退出进程", port, e);
+            bossGroup.shutdownGracefully();
+            workerGroup.shutdownGracefully();
+            System.exit(1);
         } finally {
             bossGroup.shutdownGracefully();
             workerGroup.shutdownGracefully();
