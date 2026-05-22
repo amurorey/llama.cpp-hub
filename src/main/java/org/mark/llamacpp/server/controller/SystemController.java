@@ -239,29 +239,7 @@ public class SystemController implements BaseController {
 			Map<String, Object> data = new HashMap<>();
 			
 			if (in == null || in.isEmpty()) {
-				List<Map<String, Object>> dirs = new ArrayList<>();
-				File[] roots = File.listRoots();
-				if (roots != null) {
-					for (File r : roots) {
-						if (r == null) continue;
-						String p = r.getAbsolutePath();
-						Map<String, Object> item = new HashMap<>();
-						item.put("name", p);
-						item.put("path", p);
-						dirs.add(item);
-					}
-				}
-				dirs.sort(Comparator.comparing(o -> String.valueOf(o.getOrDefault("name", "")), String.CASE_INSENSITIVE_ORDER));
-				
-				data.put("path", null);
-				data.put("parent", null);
-				data.put("directories", dirs);
-				data.put("files", new ArrayList<>());
-				data.put("truncatedDirs", false);
-				data.put("truncatedFiles", false);
-				data.put("mode", "roots");
-				LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
-				return;
+				in = System.getProperty("user.dir");
 			}
 			
 			Path raw;
