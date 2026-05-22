@@ -135,15 +135,19 @@ public class OpenAIChatStreamingHandler extends ChannelInboundHandlerAdapter {
 	@Override
 	public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
 		// 不要再打印SSL握手失败的异常
-		if(cause instanceof DecoderException)
+		if (cause instanceof DecoderException)
 			return;
-		logger.info("处理聊天流式请求时发生异常", cause);
-		if (this.currentSession != null) {
-			// 异常场景同样要取消会话，确保输入流、输出流、代理连接都能尽快释放。
-			this.currentSession.cancel();
+		if (this.intercepting || this.currentSession != null) {
+			logger.info("处理聊天流式请求时发生异常", cause);
+			if (this.currentSession != null) {
+				// 异常场景同样要取消会话，确保输入流、输出流、代理连接都能尽快释放。
+				this.currentSession.cancel();
+			}
+			this.resetSession();
+			ctx.close();
+		} else {
+			ctx.fireExceptionCaught(cause);
 		}
-		this.resetSession();
-		ctx.close();
 	}
 	
 	/**
