@@ -469,7 +469,9 @@
     let modelNodeIdMap = {};
 
     function isAudioSupported() {
-      const modelName = typeof state.model === 'string' ? state.model : '';
+      const rawModel = typeof state.model === 'string' ? state.model : '';
+      const sep = rawModel.lastIndexOf('::');
+      const modelName = sep >= 0 ? rawModel.substring(0, sep) : rawModel;
       if (!modelName) {
         return false;
       }
@@ -4665,13 +4667,16 @@
           });
         }
       }
+      const compositeKey = state.model || '';
+      const sep = compositeKey.lastIndexOf('::');
+      const bareModelId = sep >= 0 ? compositeKey.substring(0, sep) : compositeKey;
+      const nd = sep >= 0 ? compositeKey.substring(sep + 2) : '';
       const payload = {
-        model: state.model || '',
+        model: bareModelId,
         messages,
         stream: !!assistant?.stream,
         enable_thinking: !!assistant?.enableThinking
       };
-      const nd = state.model ? modelNodeIdMap[state.model] : '';
       if (nd) {
         payload.nodeId = nd;
       }
@@ -4876,22 +4881,38 @@
             if (!id) {
               continue;
             }
-            const option = document.createElement('option');
-            option.value = id;
             const nodeId = typeof item?.nodeId === 'string' && item.nodeId !== 'local' ? item.nodeId : '';
             const nodeName = nodeId && typeof item?.nodeName === 'string' && item.nodeName ? item.nodeName : nodeId;
+            const compositeKey = nodeId ? id + '::' + nodeId : id;
+            const option = document.createElement('option');
+            option.value = compositeKey;
             option.textContent = nodeId ? '[' + nodeName + '] ' + id : id;
             els.modelSelect.appendChild(option);
             if (nodeId) {
-              modelNodeIdMap[id] = nodeId;
+              modelNodeIdMap[compositeKey] = nodeId;
             }
             const caps = item?.my_capabilities;
             if (caps && typeof caps === 'object') {
               modelCapabilitiesMap[id] = caps;
             }
           }
-          if (state.model && models.some(item => item?.id === state.model)) {
-            els.modelSelect.value = state.model;
+          if (state.model) {
+            const exactMatch = Array.from(els.modelSelect.options).some(opt => opt.value === state.model);
+            if (exactMatch) {
+              els.modelSelect.value = state.model;
+            } else {
+              const sep2 = state.model.lastIndexOf('::');
+              const bareStored = sep2 >= 0 ? state.model.substring(0, sep2) : state.model;
+              const fallback = Array.from(els.modelSelect.options).find(
+                opt => opt.value === bareStored || opt.value.startsWith(bareStored + '::')
+              );
+              if (fallback) {
+                els.modelSelect.value = fallback.value;
+                state.model = fallback.value;
+              } else {
+                state.model = els.modelSelect.value || '';
+              }
+            }
           } else {
             state.model = els.modelSelect.value || '';
           }
