@@ -81,6 +81,8 @@ Aggregate multiple llama.cpp-hub instances into one unified management view. Mas
 - Node info: needs `nodeId`, `name`, `baseUrl`, optional `apiKey`
 - Protocols: HTTP and HTTPS (auto-trusts self-signed certs)
 
+> **Note:** Avoid using identical model names/IDs across different nodes. When external clients call the master node's `/v1/*` APIs (e.g., `/v1/chat/completions`), if multiple nodes have models with the same name, the system cannot determine which node to route to, resulting in call errors. Use distinct model names across nodes, or explicitly specify `nodeId` in the request body.
+
 ---
 
 ### Built-in MCP 🧪
