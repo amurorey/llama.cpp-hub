@@ -57,7 +57,7 @@
     .progress-bar .fill { height:100%; background:var(--primary-color); border-radius:2px; transition:width 0.3s; }
     .rec-area { flex:1 1 0; min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:8px; }
     .rec-table-wrap { flex:1 1 0; min-height:0; overflow:auto; }
-    .rec-table-wrap.shrink { flex-shrink:0; max-height:200px; flex:none; }
+ 
     .diff-table { width:100%; border-collapse:collapse; font-size:12px; }
     .diff-table th, .diff-table td { border:1px solid var(--border-color); padding:5px 8px; text-align:left; white-space:nowrap; }
     .diff-table th { background:var(--sidebar-bg); color:var(--text-secondary); font-weight:600; position:sticky; top:0; z-index:1; }
@@ -140,7 +140,7 @@
       <div class="card stretch" style="overflow:hidden;">
         <div class="section-title"><i class="fas fa-clock-rotate-left"></i> <span data-i18n="page.mtp_bench.section.history">历史记录</span>
           <button id="clearHistoryBtn" class="btn" style="margin-left:auto; font-size:11px;" data-i18n="page.mtp_bench.action.clear_history">清空</button></div>
-        <div class="rec-table-wrap shrink">
+        <div class="rec-table-wrap">
           <table class="result-table">
             <thead>
               <tr>
