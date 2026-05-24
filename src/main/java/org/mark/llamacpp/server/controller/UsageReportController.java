@@ -65,7 +65,13 @@ public class UsageReportController implements BaseController {
 			Map<String, String> params = ParamTool.getQueryParam(request.uri());
 			int year = Integer.parseInt(params.getOrDefault("year", String.valueOf(LocalDate.now().getYear())));
 			int month = Integer.parseInt(params.getOrDefault("month", String.valueOf(LocalDate.now().getMonthValue())));
-			Object data = UsageReportService.getInstance().getDailyTokenUsage(year, month);
+			String modelId = params.get("modelId");
+			Object data;
+			if (modelId != null && !modelId.isEmpty()) {
+				data = UsageReportService.getInstance().getDailyTokenUsage(year, month, modelId);
+			} else {
+				data = UsageReportService.getInstance().getDailyTokenUsage(year, month);
+			}
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
 		} catch (Exception e) {
 			logger.info("获取每日Token用量时发生错误", e);

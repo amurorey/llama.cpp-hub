@@ -6,6 +6,7 @@
     let dailyTokenData = [];
     let filteredLogs = [];
     let currentPage = 1;
+    let selectedModelId = '';
 
     // Tooltip state for each chart
     let tokenBars = [];
@@ -62,8 +63,12 @@
     async function fetchDailyTokens() {
         const year = document.getElementById('dailyYearSelect').value;
         const month = document.getElementById('dailyMonthSelect').value;
+        let url = '/api/report/daily-tokens?year=' + year + '&month=' + month;
+        if (selectedModelId) {
+            url += '&modelId=' + encodeURIComponent(selectedModelId);
+        }
         try {
-            const resp = await fetch('/api/report/daily-tokens?year=' + year + '&month=' + month);
+            const resp = await fetch(url);
             const result = await resp.json();
             if (!result || !result.success) {
                 dailyTokenData = [];
@@ -124,7 +129,12 @@
     function updateDailyTitle(year, month) {
         const titleEl = document.getElementById('dailyChartTitle');
         if (titleEl) {
-            titleEl.textContent = tf('page.usage_report.chart.daily_title', { year: String(year), month: String(month) }, year + '年' + month + '月用量');
+            const base = tf('page.usage_report.chart.daily_title', { year: String(year), month: String(month) }, year + '年' + month + '月用量');
+            if (selectedModelId) {
+                titleEl.textContent = '[' + escapeHtml(selectedModelId) + '] ' + base;
+            } else {
+                titleEl.textContent = base;
+            }
         }
     }
 
@@ -308,8 +318,9 @@
                 const draftPct = m.totalDraftTokens > 0 ? ((m.totalDraftAccepted || 0) / m.totalDraftTokens * 100).toFixed(1) : '0.0';
                 draftHtml = '<span class="tk-draft">' + t('report.draft_label', '投机') + ' ' + (m.totalDraftAccepted || 0) + '/' + m.totalDraftTokens + ' (' + draftPct + '%)</span>';
             }
-            cardHtml += '<div class="token-card">'
-                + '<div class="tk-model"><span class="tk-badge">' + (idx + 1) + '</span>' + escapeHtml(m.modelId || '') + '</div>'
+            const isActive = selectedModelId === (m.modelId || '');
+            cardHtml += '<div class="token-card' + (isActive ? ' token-card-selected' : '') + '" data-model-id="' + escapeAttr(m.modelId || '') + '" style="cursor:pointer;" title="' + (isActive ? '点击取消选择' : '点击选择此模型') + '">'
+                + '<div class="tk-model"><span class="tk-badge">' + (idx + 1) + '</span>' + escapeHtml(m.modelId || '') + (isActive ? ' <i class="fas fa-check-circle" style="color:var(--primary-color);margin-left:4px;font-size:12px;"></i>' : '') + '</div>'
                 + '<div class="tk-tokens">'
                 + '<span>' + t('report.prompt_label', '输入') + ' ' + (m.totalPromptTokens || 0).toLocaleString() + '</span>'
                 + '<span>' + t('report.output_label', '输出') + ' ' + (m.totalPredictedTokens || 0).toLocaleString() + '</span>'
@@ -322,6 +333,21 @@
             cardHtml = '<div class="empty">' + t('page.usage_report.chart_empty', '暂无数据') + '</div>';
         }
         body.innerHTML = cardHtml;
+
+        // Bind click handlers for model selection
+        const cards = body.querySelectorAll('.token-card');
+        for (const card of cards) {
+            card.onclick = function () {
+                const modelId = this.dataset.modelId || '';
+                if (selectedModelId === modelId) {
+                    selectedModelId = '';
+                } else {
+                    selectedModelId = modelId;
+                }
+                renderTokenSummary();
+                fetchDailyTokens();
+            };
+        }
 
         stats.innerHTML = ''
             + '<div class="stat-card"><div class="stat-value">' + totalModels + '</div><div class="stat-label">' + t('page.usage_report.stats.models_with_records', '有记录的模型') + '</div></div>'

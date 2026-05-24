@@ -113,6 +113,13 @@ public class UsageReportService {
 	 * 基于请求日志，聚合指定月份的每日 Token 用量。
 	 */
 	public List<DailyTokenEntry> getDailyTokenUsage(int year, int month) {
+		return getDailyTokenUsage(year, month, null);
+	}
+
+	/**
+	 * 基于请求日志，聚合指定月份、指定模型的每日 Token 用量。
+	 */
+	public List<DailyTokenEntry> getDailyTokenUsage(int year, int month, String modelId) {
 		LocalDate firstDay = LocalDate.of(year, month, 1);
 		LocalDate lastDay = firstDay.withDayOfMonth(firstDay.lengthOfMonth());
 
@@ -124,6 +131,7 @@ public class UsageReportService {
 		Map<String, DailyTokenEntry> dayMap = new LinkedHashMap<>();
 		for (RequestLogEntry log : logs) {
 			if (log.getStartTime() <= 0) continue;
+			if (modelId != null && !modelId.isEmpty() && !modelId.equals(log.getModelId())) continue;
 			LocalDate day = Instant.ofEpochMilli(log.getStartTime()).atZone(ZoneId.systemDefault()).toLocalDate();
 			if (day.isBefore(firstDay) || day.isAfter(lastDay)) continue;
 			DailyTokenEntry entry = dayMap.get(day.toString());
