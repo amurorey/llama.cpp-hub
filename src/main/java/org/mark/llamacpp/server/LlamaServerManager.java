@@ -1429,12 +1429,42 @@ public class LlamaServerManager {
 	}
 
 	/**
-	 * 将 --spec-type_xxx 拆分为 --spec-type xxx（两个 token）。
-	 * llama-server 要求 --spec-type 与其值作为独立参数。
+	 * 合并多个 --spec-type 为逗号分隔形式。
+	 * 处理两种格式：
+	 *   --spec-type_xxx（下划线，来自前端 LOGIC 参数）
+	 *   --spec-type xxx（空格，来自 extraParams）
+	 * 输出：--spec-type val1,val2,val3
 	 */
 	private static String splitSpecType(String input) {
 		if (input == null || input.isEmpty()) return input;
-		return input.replace("--spec-type_", "--spec-type ");
+
+		String[] tokens = input.split("\\s+");
+		List<String> values = new ArrayList<>();
+		List<String> out = new ArrayList<>();
+
+		for (int i = 0; i < tokens.length; i++) {
+			String t = tokens[i];
+
+			if (t.startsWith("--spec-type_")) {
+				String v = t.substring("--spec-type_".length());
+				if (!v.isEmpty()) values.add(v);
+				continue;
+			}
+
+			if ("--spec-type".equals(t) && i + 1 < tokens.length) {
+				String v = tokens[i + 1];
+				if (!v.isEmpty()) values.add(v);
+				i++;
+				continue;
+			}
+
+			out.add(t);
+		}
+
+		if (values.isEmpty()) return input;
+
+		out.add(0, "--spec-type " + String.join(",", values));
+		return String.join(" ", out);
 	}
 	
 	//##########################################################################################
