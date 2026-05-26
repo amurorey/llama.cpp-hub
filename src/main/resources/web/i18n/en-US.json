@@ -799,7 +799,7 @@
   "param.server.image_max_tokens.name": "Image max tokens",
   "param.server.image_max_tokens.desc": "--image-max-tokens: Maximum number of tokens each image can take, only used by vision models with dynamic resolution. When not set, the value is read from the model file. If you don't know what this does, leave it alone.",
   "param.server.ctx_checkpoints.name": "CTX Checkpoints",
-  "param.server.ctx_checkpoints.desc": "max number of context checkpoints to create per slot. If there is insufficient video memory (some models may have vram leak issues, such as Gemma-4, see issue #21690 in llama.cpp), please reduce this value or set it to 0. (default: 8)",
+  "param.server.ctx_checkpoints.desc": "--ctx-checkpoints / --swa-checkpoints / -ctxcp: max number of context checkpoints to create per slot. If there is insufficient video memory (some models may have vram leak issues, such as Gemma-4, see issue #21690 in llama.cpp), please reduce this value or set it to 0. (default: 32)",
   "param.server.checkpoint_every_nt.name": "Checkpoint interval",
   "param.server.checkpoint_every_nt.desc": "--checkpoint-min-step: Create a context checkpoint every N tokens during prompt prefill. Useful for long prompts so the slot can resume from a checkpoint if interrupted. Works together with --ctx-checkpoints: this controls how often to create checkpoints, while --ctx-checkpoints limits how many are kept per slot. ⚠ If you do not understand the specific meaning of this parameter, do not modify it. (default: 256)",
   "param.server.no_cache_idle_slots.name": "Disable idle slot cache",
