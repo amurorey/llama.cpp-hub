@@ -816,7 +816,6 @@ public class SystemController implements BaseController {
 			
 			Map<String, Object> server = new HashMap<>();
 			server.put("webPort", LlamaServer.getWebPort());
-			server.put("anthropicPort", LlamaServer.getAnthropicPort());
 			data.put("server", server);
 			
 			Map<String, Object> download = new HashMap<>();
@@ -890,7 +889,6 @@ public class SystemController implements BaseController {
 			Boolean logRequestBody = firstBoolean(obj, "LlamaServer.logRequestBody", "logRequestBody", "log_request_body");
 			
 			Integer webPort = firstPort(obj, "webPort", "web_port");
-			Integer anthropicPort = firstPort(obj, "anthropicPort", "anthropic_port");
 			Boolean apiKeyEnabled = firstBoolean(obj, "apiKeyEnabled", "api_key_enabled");
 			String apiKey = JsonUtil.getJsonString(obj, "apiKey", null);
 			Boolean httpsEnabled = firstBoolean(obj, "httpsEnabled", "https_enabled");
@@ -899,7 +897,7 @@ public class SystemController implements BaseController {
 			String downloadDirectory = JsonUtil.getJsonString(obj, "downloadDirectory", null);
 
 			if (ollamaPort == null && lmstudioPort == null && logRequestUrl == null && logRequestHeader == null && logRequestBody == null
-				&& webPort == null && anthropicPort == null && apiKeyEnabled == null && apiKey == null
+				&& webPort == null && apiKeyEnabled == null && apiKey == null
 				&& httpsEnabled == null && httpsCertPath == null && httpsPassword == null
 				&& downloadDirectory == null) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少可保存参数"));
@@ -926,16 +924,12 @@ public class SystemController implements BaseController {
 				LlamaServer.updateRequestLogConfig(logRequestUrl, logRequestHeader, logRequestBody);
 			}
 			
-			if (webPort != null || anthropicPort != null) {
+			if (webPort != null) {
 				if (webPort != null && !isValidPort(webPort.intValue())) {
 					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("webPort参数不合法"));
 					return;
 				}
-				if (anthropicPort != null && !isValidPort(anthropicPort.intValue())) {
-					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("anthropicPort参数不合法"));
-					return;
-				}
-				LlamaServer.updateServerPorts(webPort, anthropicPort);
+				LlamaServer.updateServerPorts(webPort);
 			}
 			
 			if (apiKeyEnabled != null || apiKey != null) {
