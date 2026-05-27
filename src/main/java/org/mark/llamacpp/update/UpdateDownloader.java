@@ -5,12 +5,14 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,6 +31,7 @@ public class UpdateDownloader {
     private static final String UPDATE_ZIP = CACHE_DIR + File.separator + "update.zip";
     private static final String UPDATE_PENDING_VERSION = CACHE_DIR + File.separator + "update-pending-version";
 
+    private final HttpClient httpClient;
     private final AtomicReference<UpdateDownloadStatus> status = new AtomicReference<>(UpdateDownloadStatus.IDLE);
     private final AtomicLong downloadedBytes = new AtomicLong(0);
     private final AtomicLong totalBytes = new AtomicLong(-1);
@@ -47,6 +50,9 @@ public class UpdateDownloader {
     }
 
     private UpdateDownloader() {
+        this.httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .build();
     }
 
     public boolean downloadAsync(String url, String version) {
@@ -119,29 +125,41 @@ public class UpdateDownloader {
                 Files.createDirectories(parent);
             }
 
-            HttpURLConnection conn = connect(url);
-            int respCode = conn.getResponseCode();
-            if (respCode != HttpURLConnection.HTTP_OK) {
-                conn.disconnect();
+            HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofMinutes(2))
+                .header("User-Agent", "llama.cpp-hub-updater")
+                .header("Accept", "*/*")
+                .GET()
+                .build();
+
+            HttpResponse<InputStream> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            int respCode = response.statusCode();
+            if (respCode != 200) {
                 fail(I18N_HTTP_ERROR);
                 return;
             }
 
-            long contentLength = conn.getContentLengthLong();
-            if (contentLength > 0) {
-                totalBytes.set(contentLength);
+            String contentLengthHeader = firstHeader(response, "Content-Length");
+            if (contentLengthHeader != null) {
+                try {
+                    long contentLength = Long.parseLong(contentLengthHeader.trim());
+                    if (contentLength > 0) {
+                        totalBytes.set(contentLength);
+                    }
+                } catch (NumberFormatException ignore) {
+                }
             }
 
             broadcastProgress();
 
-            try (InputStream in = conn.getInputStream(); OutputStream out = new FileOutputStream(target.toFile())) {
+            try (InputStream in = response.body(); OutputStream out = new FileOutputStream(target.toFile())) {
                 byte[] buf = new byte[8192];
                 int len;
                 long lastBroadcast = System.currentTimeMillis();
 
                 while ((len = in.read(buf)) != -1) {
                     if (cancelled.get()) {
-                        conn.disconnect();
                         cleanup(target);
                         status.set(UpdateDownloadStatus.IDLE);
                         WebSocketManager.getInstance().sendAppUpdateEvent("failed", 0, totalBytes.get(), -1, currentVersion, I18N_CANCELLED);
@@ -158,7 +176,6 @@ public class UpdateDownloader {
                 }
                 out.flush();
             }
-            conn.disconnect();
 
             savePendingVersion(userDir, currentVersion);
             status.set(UpdateDownloadStatus.READY);
@@ -174,17 +191,16 @@ public class UpdateDownloader {
             logger.error("下载更新包时发生错误", e);
             fail(I18N_FAILED);
             cleanup(target);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            cleanup(target);
+            status.set(UpdateDownloadStatus.IDLE);
+            WebSocketManager.getInstance().sendAppUpdateEvent("failed", 0, totalBytes.get(), -1, currentVersion, I18N_CANCELLED);
         }
     }
 
-    private HttpURLConnection connect(String downloadUrl) throws IOException {
-        URL url = URI.create(downloadUrl).toURL();
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestProperty("User-Agent", "llama.cpp-hub-updater");
-        conn.setRequestProperty("Accept", "*/*");
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(120_000);
-        return conn;
+    private static String firstHeader(HttpResponse<?> response, String name) {
+        return response.headers().firstValue(name).orElse(null);
     }
 
     private void broadcastProgress() {
