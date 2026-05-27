@@ -39,6 +39,31 @@ One backend, four compatible APIs. Point your favorite SDK at it and you're off:
 | Ollama | 11434 | ⚠️ Off by default, enable manually |
 | LM Studio | 1234 | ⚠️ Off by default, enable manually |
 
+**LM Studio compatibility note:** Only the following endpoints are implemented:
+
+| Status | Endpoint | Description |
+|--------|----------|-------------|
+| ✅ | `/api/v0/models` | Model list |
+| ✅ | `/api/v0/chat/completions` | Chat completions |
+| ✅ | `/api/v0/completions` | Text completions |
+| ✅ | `/api/v0/embeddings` | Embeddings |
+| ✅ | `/v1/models` | OpenAI format model list |
+| ✅ | `/v1/chat/completions` | OpenAI format chat completions |
+| ✅ | `/v1/completions` | OpenAI format text completions |
+| ✅ | `/v1/embeddings` | OpenAI format embeddings |
+| ✅ | `/v1/rerank` | OpenAI format reranking |
+
+The following LM Studio proprietary endpoints are **not compatible** and no longer maintained:
+
+| Endpoint | Method |
+|----------|--------|
+| `/api/v1/chat` | POST |
+| `/api/v1/models` | GET |
+| `/api/v1/models/load` | POST |
+| `/api/v1/models/unload` | POST |
+| `/api/v1/models/download` | POST |
+| `/api/v1/models/download/status` | GET |
+
 ### Web Admin Panel
 
 Desktop is the main squeeze — fully featured. Mobile ⚠️ chronically under-maintained, expect UI jank.

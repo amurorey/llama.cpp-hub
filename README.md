@@ -39,6 +39,31 @@
 | Ollama | 11434 | ⚠️ 默认关闭，需手动启用 |
 | LM Studio | 1234 | ⚠️ 默认关闭，需手动启用 |
 
+**LM Studio 兼容说明：** 本项目仅实现以下端点：
+
+| 状态 | 端点 | 说明 |
+|------|------|------|
+| ✅ | `/api/v0/models` | 模型列表 |
+| ✅ | `/api/v0/chat/completions` | 聊天补全 |
+| ✅ | `/api/v0/completions` | 文本补全 |
+| ✅ | `/api/v0/embeddings` | 嵌入向量 |
+| ✅ | `/v1/models` | OpenAI 格式模型列表 |
+| ✅ | `/v1/chat/completions` | OpenAI 格式聊天补全 |
+| ✅ | `/v1/completions` | OpenAI 格式文本补全 |
+| ✅ | `/v1/embeddings` | OpenAI 格式嵌入向量 |
+| ✅ | `/v1/rerank` | OpenAI 格式重排序 |
+
+以下 LM Studio 自有端点 **不兼容**，不再维护：
+
+| 端点 | 方法 |
+|------|------|
+| `/api/v1/chat` | POST |
+| `/api/v1/models` | GET |
+| `/api/v1/models/load` | POST |
+| `/api/v1/models/unload` | POST |
+| `/api/v1/models/download` | POST |
+| `/api/v1/models/download/status` | GET |
+
 ### Web 管理面板
 
 桌面端主力维护，功能完整。移动端 ⚠️ 长期缺维护，可能存在 UI 问题。
