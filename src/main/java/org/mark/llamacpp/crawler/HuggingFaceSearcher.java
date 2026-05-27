@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Searches HuggingFace for GGUF models by name.
@@ -37,6 +38,14 @@ public final class HuggingFaceSearcher {
         ".git", "docs", "tests", "scripts", ".github", "notebooks",
         "examples", "src", "lib", "build", ".vscode", ".idea",
         "images", "figures", "artifacts", "tmp", "temp", ".cache"
+    );
+
+    private static final List<String> USER_AGENTS = List.of(
+        "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/39.0.2171.95 Safari/537.36 OPR/26.0.1656.60",
+        "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/30.0.1599.101 Safari/537.36",
+        "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1; SV1; QQDownload 732; .NET4.0C; .NET4.0E; LBBROWSER)",
+        "Mozilla/5.0 (Windows NT 5.1) AppleWebKit/535.11 (KHTML, like Gecko) Chrome/17.0.963.84 Safari/535.11 SE 2.X MetaSr 1.0",
+        "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/38.0.2125.122 UBrowser/4.0.3214.0 Safari/537.36"
     );
 
     // ---------------------------------------------------------------------------
@@ -215,7 +224,7 @@ public final class HuggingFaceSearcher {
 
     private static JsonObject fetchModelInfo(String base, String repoId, int timeout)
             throws IOException {
-        HttpUtils.Response resp = sendGet(base + "/api/models/" + repoId, timeout, "application/json");
+        NettyHttpUtils.Response resp = sendGet(base + "/api/models/" + repoId, timeout, "application/json");
         JsonElement root = JsonParser.parseString(resp.bodyAsString());
         if (!root.isJsonObject())
             throw new IOException("Response is not a JSON object: " + resp.bodyAsString());
@@ -237,7 +246,7 @@ public final class HuggingFaceSearcher {
         if (cursor != null && !cursor.isBlank())
             url.append("&cursor=").append(URLEncoder.encode(cursor, StandardCharsets.UTF_8).replace("+", "%20"));
 
-        HttpUtils.Response resp = sendGet(url.toString(), timeout, "application/json");
+        NettyHttpUtils.Response resp = sendGet(url.toString(), timeout, "application/json");
 
         JsonElement root = JsonParser.parseString(resp.bodyAsString());
         JsonArray entries = root != null && root.isJsonArray() ? root.getAsJsonArray() : new JsonArray();
@@ -342,7 +351,7 @@ public final class HuggingFaceSearcher {
         if (cursor != null && !cursor.isBlank())
             url.append("&cursor=").append(URLEncoder.encode(cursor, StandardCharsets.UTF_8).replace("+", "%20"));
 
-        HttpUtils.Response resp = sendGet(url.toString(), timeout, "application/json");
+        NettyHttpUtils.Response resp = sendGet(url.toString(), timeout, "application/json");
 
         JsonElement root = JsonParser.parseString(resp.bodyAsString());
         JsonArray entries = root != null && root.isJsonArray() ? root.getAsJsonArray() : new JsonArray();
@@ -514,11 +523,17 @@ public final class HuggingFaceSearcher {
     // HTTP helpers
     // ---------------------------------------------------------------------------
 
-    private static HttpUtils.Response sendGet(String urlStr, int timeout, String accept) throws IOException {
-        HttpUtils.Request req = HttpUtils.request(urlStr)
-                .header("User-Agent", "hf-model-searcher/0.1.0 (+https://huggingface.co)")
+    private static String randomUserAgent() {
+        return USER_AGENTS.get(ThreadLocalRandom.current().nextInt(USER_AGENTS.size()));
+    }
+
+    private static NettyHttpUtils.Response sendGet(String urlStr, int timeout, String accept) throws IOException {
+        NettyHttpUtils.Request req = NettyHttpUtils.request(urlStr)
+                .header("User-Agent", randomUserAgent())
                 .header("Accept", accept == null || accept.isBlank() ? "*/*" : accept)
                 .readTimeout(timeout);
+                //.proxy(ProxyConfig.http("10.8.0.18", 8888, "admin", "123456")); // TODO: remove before production
+                //.proxy(ProxyConfig.http("127.0.0.1", 51213)); // TODO: remove before production
 
         String token = System.getenv("HF_TOKEN");
         if (token != null && !token.isBlank())
