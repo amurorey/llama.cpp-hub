@@ -5134,47 +5134,16 @@
       if (!firstUser) {
         return;
       }
-      const userText = getMessageText(firstUser).trim().slice(0, 200);
-      if (!userText) {
+      const firstAssistant = conversation.messages.find(m => m.role === 'assistant' && hasMessageBody(m));
+      if (!firstAssistant) {
+        return;
+      }
+      const userContent = buildUserContent(firstUser);
+      const assistantContent = contentToText(firstAssistant.content);
+      if (!userContent && !assistantContent) {
         return;
       }
       const convAssistant = getConversationAssistant(conversation);
-      const systemText = convAssistant?.systemPrompt?.trim() || '';
-      const isChinese = /[\u4e00-\u9fff]/.test(userText);
-      const systemPrompt = isChinese
-        ? '你是一个标题生成器，严格按照以下规则输出：\n'
-          + '1. 只输出标题本身，禁止任何解释、前缀、标点符号\n'
-          + '2. 标题不超过 28 个字符\n'
-          + '3. 禁止使用引号、冒号、破折号、句号\n'
-          + '4. 禁止输出"标题："、"Title："等前缀\n'
-          + '5. 直接输出标题，不要使用"输出："等引导词\n'
-          + '\n'
-          + '示例：\n'
-          + 'User: 帮我写一个Python快速排序算法\n'
-          + 'Assistant: 好的，以下是快速排序的实现\n'
-          + '快速排序算法\n'
-          + '\n'
-          + 'User: 用简单的语言解释一下什么是大语言模型\n'
-          + 'Assistant: 大语言模型是一种人工智能模型\n'
-          + '大语言模型简介'
-        : 'You are a title generator. Follow these rules strictly:\n'
-          + '1. Output ONLY the title, no explanations, prefixes, or punctuation\n'
-          + '2. Title must be 28 characters or fewer\n'
-          + '3. No quotes, colons, dashes, or periods\n'
-          + '4. Never output prefixes like "Title:" or "标题:"\n'
-          + '5. Output the title directly without any lead-in words\n'
-          + '\n'
-          + 'Examples:\n'
-          + 'User: Explain the difference between TCP and UDP\n'
-          + 'Assistant: TCP is connection-oriented while UDP is connectionless\n'
-          + 'TCP vs UDP Difference\n'
-          + '\n'
-          + 'User: Write a Python quicksort algorithm\n'
-          + 'Assistant: Here is a quicksort implementation in Python\n'
-          + 'Python Quicksort Algorithm';
-      const exchange = systemText
-        ? 'System: ' + systemText + '\n\nUser: ' + userText
-        : 'User: ' + userText;
       const compositeKey = state.titleGenModel || state.model || '';
       if (!compositeKey) {
         return;
@@ -5182,20 +5151,27 @@
       const sep = compositeKey.lastIndexOf('::');
       const bareModelId = sep >= 0 ? compositeKey.substring(0, sep) : compositeKey;
       const nd = sep >= 0 ? compositeKey.substring(sep + 2) : '';
+      const messages = [];
+      if (convAssistant?.systemPrompt?.trim()) {
+        messages.push({ role: 'system', content: convAssistant.systemPrompt.trim() });
+      }
+      messages.push({ role: 'user', content: userContent });
+      messages.push({ role: 'assistant', content: assistantContent });
+      messages.push({
+        role: 'user',
+        content: 'Based on our conversation so far, can you suggest a name for this conversation? Put the name in the <name> tags. For example "<name>Student Loan Planning</name>".'
+      });
       const body = {
         model: bareModelId,
-        messages: [
-          { role: 'system', content: systemPrompt }
-        ],
-        max_tokens: 15,
-        temperature: 0.1,
+        messages,
+        max_tokens: 30,
+        temperature: 0.3,
         enable_thinking: false,
         stream: false
       };
       if (nd) {
         body.nodeId = nd;
       }
-      body.messages.push({ role: 'user', content: exchange });
       try {
         const response = await fetch(CHAT_ENDPOINT, {
           method: 'POST',
@@ -5206,15 +5182,11 @@
           return;
         }
         const data = await response.json();
-        const rawTitle = data?.choices?.[0]?.message?.content || '';
-        const title = rawTitle
-          .replace(/^["'「『【】』」""]+|["'」』【】「」""]+$/g, '')
-          .replace(/^(标题[：:]|Title[：:]\s*)/i, '')
-          .replace(/^[：:;；.\s]+|[：:;；.\s]+$/g, '')
-          .trim();
-        const cleaned = title.length > 40 ? title.slice(0, 37) + '...' : title;
-        if (cleaned) {
-          conversation.title = cleaned;
+        const raw = data?.choices?.[0]?.message?.content || '';
+        const match = raw.match(/<name>([^<]*)<\/name>/);
+        const title = match ? match[1].trim() : '';
+        if (title) {
+          conversation.title = title;
           renderConversationList();
           syncConversationMeta();
           await persistState({ immediate: true });
