@@ -58,6 +58,7 @@
             tokenSummaryData = [];
         }
         renderTokenSummary();
+        buildModelFilter();
     }
 
     async function fetchDailyTokens() {
@@ -155,7 +156,6 @@
         } catch (e) {
             requestLogsData = [];
         }
-        buildModelFilter();
         renderRequestLogs();
     }
 
@@ -576,7 +576,7 @@
     function buildModelFilter() {
         const select = document.getElementById('requestLogModelFilter');
         const modelSet = new Set();
-        for (const r of requestLogsData) {
+        for (const r of tokenSummaryData) {
             if (r.modelId) modelSet.add(r.modelId);
         }
         const models = Array.from(modelSet).sort();
