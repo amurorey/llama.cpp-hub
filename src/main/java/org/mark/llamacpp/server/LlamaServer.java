@@ -30,6 +30,7 @@ import org.mark.llamacpp.server.channel.LlamaRouterHandler;
 import org.mark.llamacpp.server.io.ConsoleBroadcastOutputStream;
 import org.mark.llamacpp.server.io.ConsoleBufferLogAppender;
 import org.mark.llamacpp.server.mcp.McpClientService;
+import org.mark.llamacpp.server.service.LlamaRecordService;
 import org.mark.llamacpp.server.service.ModelSamplingService;
 import org.mark.llamacpp.gguf.GGUFModel;
 import org.mark.llamacpp.server.struct.LlamaCppConfig;
@@ -191,6 +192,9 @@ public class LlamaServer {
 				logger.info("启动MCP服务失败: {}", e.getMessage());
 			}
 		}
+		
+		// 初始化一下记录服务
+		LlamaRecordService.getInstance();
 
 		// 尝试创建系统托盘
 		createWindowsSystemTray();

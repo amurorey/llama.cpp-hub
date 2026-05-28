@@ -11,12 +11,16 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
+
+/**
+ *  嘿嘿嘿嘿。这玩意用于写入日志，用byte写入。
+ */
 public class BinaryRequestLog implements Closeable {
 
     public static final int MAGIC = 0x524C4F47;
     public static final int VERSION = 1;
-    public static final int HEADER_SIZE = 64;
-    public static final int RECORD_SIZE = 60;
+    public static final int HEADER_SIZE = 80;
+    public static final int RECORD_SIZE = 55;
 
     private FileChannel channel;
 
@@ -27,6 +31,8 @@ public class BinaryRequestLog implements Closeable {
     private long totalDraftTokens;
     private long totalDraftAccepted;
     private long lastRecordTime;
+    private double totalPromptMs;
+    private double totalPredictedMs;
 
     public BinaryRequestLog(Path filePath) throws IOException {
         this.channel = FileChannel.open(filePath,
@@ -52,6 +58,8 @@ public class BinaryRequestLog implements Closeable {
         buf.putLong(0);
         buf.putLong(0);
         buf.putLong(0);
+        buf.putDouble(0);
+        buf.putDouble(0);
         synchronized (this.channel) {
             this.channel.position(0);
             buf.flip();
@@ -82,6 +90,8 @@ public class BinaryRequestLog implements Closeable {
         this.totalDraftTokens = buf.getLong();
         this.totalDraftAccepted = buf.getLong();
         this.lastRecordTime = buf.getLong();
+        this.totalPromptMs = buf.getDouble();
+        this.totalPredictedMs = buf.getDouble();
     }
 
     private void writeHeader() throws IOException {
@@ -96,6 +106,8 @@ public class BinaryRequestLog implements Closeable {
         buf.putLong(this.totalDraftTokens);
         buf.putLong(this.totalDraftAccepted);
         buf.putLong(this.lastRecordTime);
+        buf.putDouble(this.totalPromptMs);
+        buf.putDouble(this.totalPredictedMs);
         synchronized (this.channel) {
             this.channel.position(0);
             buf.flip();
@@ -155,10 +167,12 @@ public class BinaryRequestLog implements Closeable {
         if ("COMPLETED".equals(status)) return 1;
         if ("FAILED".equals(status)) return 2;
         if ("CANCELLED".equals(status)) return 3;
+        if ("PROXYING".equals(status)) return 4;
         return 1;
     }
 
     private static byte parsePhase(String phase) {
+        if ("PREFILL".equals(phase)) return 0;
         if ("PROMPT".equals(phase)) return 0;
         if ("GENERATION".equals(phase)) return 1;
         return 1;
@@ -228,6 +242,8 @@ public class BinaryRequestLog implements Closeable {
         this.totalDraftTokens += draftN;
         this.totalDraftAccepted += draftNAccepted;
         this.lastRecordTime = startTime;
+        this.totalPromptMs += promptMs;
+        this.totalPredictedMs += predictedMs;
         writeHeader();
     }
 
@@ -263,8 +279,7 @@ public class BinaryRequestLog implements Closeable {
         for (int i = 0; i < actualCount; i++) {
             ByteBuffer recordBuf = ByteBuffer.allocate(RECORD_SIZE);
             recordBuf.order(ByteOrder.LITTLE_ENDIAN);
-            recordBuf.put(buf);
-            recordBuf.flip();
+            buf.get(recordBuf.array());
             records[i] = decodeRecord(recordBuf);
         }
         return records;
@@ -316,6 +331,14 @@ public class BinaryRequestLog implements Closeable {
 
     public long getLastRecordTime() {
         return this.lastRecordTime;
+    }
+
+    public double getTotalPromptMs() {
+        return this.totalPromptMs;
+    }
+
+    public double getTotalPredictedMs() {
+        return this.totalPredictedMs;
     }
 
     @Override

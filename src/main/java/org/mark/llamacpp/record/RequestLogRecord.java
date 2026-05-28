@@ -45,13 +45,14 @@ public class RequestLogRecord {
             case 1: return "COMPLETED";
             case 2: return "FAILED";
             case 3: return "CANCELLED";
+            case 4: return "PROXYING";
             default: return "UNKNOWN(" + this.status + ")";
         }
     }
 
     public String phaseName() {
         switch (this.phase) {
-            case 0: return "PROMPT";
+            case 0: return "PREFILL";
             case 1: return "GENERATION";
             default: return "UNKNOWN(" + this.phase + ")";
         }
