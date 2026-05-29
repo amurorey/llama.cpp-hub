@@ -45,7 +45,7 @@ public class FetchWebPageTool implements IMCPTool {
     }
 
     @Override
-    public McpMessage execute(String serviceKey, JsonObject arguments) {
+    public McpMessage execute(String serviceKey, JsonObject arguments, Map<String, String> headers) {
         JsoupCliHelper helper = JsoupCliHelper.getInstance();
         if (!helper.isAvailable()) {
             return new McpMessage().addText(JsonUtil.toJson(error("JsoupCli 不可用: " + helper.getInitError())));
