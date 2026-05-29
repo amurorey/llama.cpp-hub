@@ -88,6 +88,13 @@ public class LlamaServer {
 	@SuppressWarnings("unchecked")
 	public static void main(String[] args) {
 		// 先输出一下启动参数助助兴。
+		final String javaLibraryPath = System.getProperty("java.library.path");
+		logger.info("JVM path: " + javaLibraryPath);
+		
+		final String javaHome = System.getProperty("java.home");
+		
+		logger.info("Java home: " + javaHome);
+		
 		RuntimeMXBean runtimeMxBean = ManagementFactory.getRuntimeMXBean();
         List<String> arguments = runtimeMxBean.getInputArguments();
         for (String arg : arguments) {

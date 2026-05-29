@@ -16,8 +16,6 @@ public class JsoupCliHelper {
     private static final JsoupCliHelper INSTANCE = new JsoupCliHelper();
     private static final String CACHE_DIR_NAME = "cache/tools/jsoup";
     private static final String RESOURCE_PATH = "/tools/jsoup/release.jar";
-    private static final String NETTY_JAR_NAME = "netty-all-4.1.35.Final.jar";
-
     private volatile boolean initialized = false;
     private String releaseJarPath;
     private String nettyJarPath;
@@ -96,11 +94,16 @@ public class JsoupCliHelper {
 
     private String findJavaExecutable() {
         String javaHome = System.getProperty("java.home");
-        String candidate = javaHome + File.separator + "bin" + File.separator + "java";
+        String ext = System.getProperty("os.name").toLowerCase().contains("windows") ? ".exe" : "";
+        String candidate = javaHome + File.separator + "bin" + File.separator + "javaw" + ext;
         if (new File(candidate).exists()) {
             return candidate;
         }
-
+        candidate = javaHome + File.separator + "bin" + File.separator + "java" + ext;
+        if (new File(candidate).exists()) {
+            return candidate;
+        }
+        
         try {
             ProcessBuilder pb = new ProcessBuilder("where", "java");
             pb.redirectErrorStream(true);
@@ -119,24 +122,14 @@ public class JsoupCliHelper {
     }
 
     private String findNettyJar() {
-        String userDir = System.getProperty("user.dir");
-        Path libPath = Paths.get(userDir, "lib", NETTY_JAR_NAME);
-        if (Files.exists(libPath)) {
-            return libPath.toAbsolutePath().toString();
-        }
-
-        try {
-            String jarPath = JsoupCliHelper.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath();
-            Path jarFile = Paths.get(jarPath).normalize();
-            Path jarParent = jarFile.getParent();
-            if (jarParent != null) {
-                Path libNextToJar = jarParent.resolve("lib").resolve(NETTY_JAR_NAME);
-                if (Files.exists(libNextToJar)) {
-                    return libNextToJar.toAbsolutePath().toString();
-                }
+        String classPath = System.getProperty("java.class.path");
+        String separator = System.getProperty("os.name").toLowerCase().contains("windows") ? ";" : ":";
+        for (String cp : classPath.split(separator)) {
+            File file = new File(cp);
+            if (file.isFile() && file.getName().contains("netty")) {
+                return file.getAbsolutePath();
             }
-        } catch (Exception ignored) {}
-
+        }
         return null;
     }
 
