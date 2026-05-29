@@ -1863,7 +1863,7 @@ public class LlamaServerManager {
 		if(cmdMap.containsKey("--main-gpu")) {
 			// 如果是默认值-1，要改成0
 			if("-1".equals(cmdMap.get("--main-gpu"))) {
-				cmdMap.put("--main-gpu", "1");
+				cmdMap.put("--main-gpu", "0");
 			}
 		}
 
