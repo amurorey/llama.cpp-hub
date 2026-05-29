@@ -1858,6 +1858,14 @@ public class LlamaServerManager {
 		command += " --model " + model.getPrimaryModel().getFilePath();
 		//command += " -lv 4";
 		command += " -fitp on";
+		
+		// 仅针对--main-gpu做特殊处理
+		if(cmdMap.containsKey("--main-gpu")) {
+			// 如果是默认值-1，要改成0
+			if("-1".equals(cmdMap.get("--main-gpu"))) {
+				cmdMap.put("--main-gpu", "1");
+			}
+		}
 
 		for(String key : keysParam) {
 			// 如果有这个参数
