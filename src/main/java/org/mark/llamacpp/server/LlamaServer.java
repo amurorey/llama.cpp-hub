@@ -1701,7 +1701,7 @@ public static String getDefaultModelsPath() {
 		response.headers().set(HttpHeaderNames.CONTENT_LENGTH, entry.content.length);
 		response.headers().set(HttpHeaderNames.CONTENT_TYPE, entry.contentType);
 		response.headers().set(HttpHeaderNames.ETAG, entry.etag);
-		response.headers().set(HttpHeaderNames.CACHE_CONTROL, "max-age=3600");
+		response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
 		setCorsHeaders(response.headers());
 		ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
 			@Override
