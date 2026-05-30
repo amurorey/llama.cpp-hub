@@ -1833,7 +1833,7 @@
                     <i class="fas fa-info-circle" style="color: #f59e0b; margin-top: 1px; flex-shrink: 0;"></i>
                     <span data-i18n="modal.model_action.fit_params.disclaimer">注意：该工具不支持张量并行模式，且在多GPU场景下并不能计算出完美的最佳分配。该功能等价于使用参数：自适应显存（--fit on），正常情况下直接开启该功能即可。</span>
                 </div>
-                <div id="fitParamsResultContent" style="font-size: 14px; line-height: 1.8;"></div>
+                <div id="fitParamsResultContent" style="font-size: 14px; line-height: 1.8; overflow-x: hidden; word-break: break-word;"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('fitParamsResultModal')" data-i18n="common.close">关闭</button>

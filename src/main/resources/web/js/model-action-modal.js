@@ -1478,7 +1478,7 @@ function fitParamsAction() {
                     let html = '<table style="width:100%;border-collapse:collapse;">';
                     html += '<tr><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border-color);font-size:13px;">' + t('modal.model_action.fit_params.table.param', '参数') + '</th><th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border-color);font-size:13px;">' + t('modal.model_action.fit_params.table.value', '值') + '</th></tr>';
                     for (const [key, value] of Object.entries(fitted)) {
-                        html += '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);font-family:monospace;">' + key + '</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);font-family:monospace;">' + value + '</td></tr>';
+                        html += '<tr><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);font-family:monospace;white-space:nowrap;">' + key + '</td><td style="padding:6px 8px;border-bottom:1px solid var(--border-color);font-family:monospace;word-break:break-all;">' + value + '</td></tr>';
                     }
                     html += '</table>';
                     content.innerHTML = html;
