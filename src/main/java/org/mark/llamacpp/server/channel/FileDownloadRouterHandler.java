@@ -2,7 +2,10 @@ package org.mark.llamacpp.server.channel;
 
 
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -24,11 +27,19 @@ import org.mark.llamacpp.server.LlamaServer;
 import org.mark.llamacpp.server.NodeManager;
 import org.mark.llamacpp.server.tools.JsonUtil;
 
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponseStatus;
+import io.netty.handler.codec.http.HttpResponse;
+import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.handler.stream.ChunkedFile;
 import io.netty.util.CharsetUtil;
 import io.netty.util.ReferenceCountUtil;
 
@@ -109,6 +120,11 @@ public class FileDownloadRouterHandler extends SimpleChannelInboundHandler<FullH
 		// 获取状态
 		if (uri.startsWith("/api/downloads/stats")) {
 			this.handleGetStats(ctx);
+			return;
+		}
+		// 文件流式下载
+		if (uri.startsWith("/api/downloads/stream")) {
+			this.handleStreamFile(ctx, request);
 			return;
 		}
 		ctx.fireChannelRead(request.retain());
@@ -827,6 +843,116 @@ public class FileDownloadRouterHandler extends SimpleChannelInboundHandler<FullH
 		case FAILED -> "FAILED";
 		case PENDING -> "IDLE";
 		};
+	}
+
+	private void handleStreamFile(ChannelHandlerContext ctx, FullHttpRequest request) {
+		if (request.method() != HttpMethod.GET) {
+			LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.BAD_REQUEST, "只支持GET请求");
+			return;
+		}
+
+		String pathParam = extractQueryParam(request.uri(), "path");
+		if (pathParam == null || pathParam.trim().isEmpty()) {
+			LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.BAD_REQUEST, "path参数不能为空");
+			return;
+		}
+
+		String mode = extractQueryParam(request.uri(), "mode");
+		String decodedPath;
+		try {
+			if ("base64".equals(mode)) {
+				String padded = pathParam + "=".repeat((4 - pathParam.length() % 4) % 4);
+				decodedPath = new String(java.util.Base64.getUrlDecoder().decode(padded), StandardCharsets.UTF_8);
+			} else {
+				decodedPath = URLDecoder.decode(pathParam, StandardCharsets.UTF_8);
+			}
+		} catch (IllegalArgumentException e) {
+			LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.BAD_REQUEST, "path解码失败: " + e.getMessage());
+			return;
+		}
+
+		try {
+			Path filePath = Paths.get(decodedPath).toAbsolutePath().normalize();
+
+			if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
+				LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.NOT_FOUND, "文件不存在: " + filePath);
+				return;
+			}
+
+			String fileName = filePath.getFileName() == null ? "file" : filePath.getFileName().toString();
+			long fileLength = Files.size(filePath);
+			String contentType = inferContentType(fileName);
+
+			RandomAccessFile raf = new RandomAccessFile(filePath.toFile(), "r");
+
+			HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+			response.headers().set(HttpHeaderNames.CONTENT_LENGTH, fileLength);
+			response.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
+			response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
+			response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+			response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "Content-Type");
+			response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, DELETE, OPTIONS");
+
+			ctx.write(response);
+			ctx.write(new ChunkedFile(raf, 0, fileLength, 8192), ctx.newProgressivePromise());
+			ChannelFuture last = ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
+			last.addListener(f -> {
+				try {
+					raf.close();
+				} catch (Exception ignore) {
+				}
+				ctx.close();
+			});
+		} catch (IOException e) {
+			LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "文件读取失败: " + e.getMessage());
+		} catch (Exception e) {
+			LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "流式传输失败: " + e.getMessage());
+		}
+	}
+
+	private static String extractQueryParam(String uri, String param) {
+		int queryIdx = uri.indexOf('?');
+		if (queryIdx < 0) {
+			return null;
+		}
+		String query = uri.substring(queryIdx + 1);
+		String[] pairs = query.split("&");
+		for (String pair : pairs) {
+			int eqIdx = pair.indexOf('=');
+			if (eqIdx < 0) {
+				continue;
+			}
+			String key = pair.substring(0, eqIdx);
+			if (key.equals(param)) {
+				return pair.substring(eqIdx + 1);
+			}
+		}
+		return null;
+	}
+
+	private static String inferContentType(String fileName) {
+		if (fileName == null) {
+			return "application/octet-stream";
+		}
+		String lower = fileName.toLowerCase();
+		if (lower.endsWith(".gguf")) return "application/octet-stream";
+		if (lower.endsWith(".json")) return "application/json";
+		if (lower.endsWith(".txt")) return "text/plain; charset=UTF-8";
+		if (lower.endsWith(".html") || lower.endsWith(".htm")) return "text/html; charset=UTF-8";
+		if (lower.endsWith(".css")) return "text/css; charset=UTF-8";
+		if (lower.endsWith(".js")) return "application/javascript; charset=UTF-8";
+		if (lower.endsWith(".png")) return "image/png";
+		if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+		if (lower.endsWith(".gif")) return "image/gif";
+		if (lower.endsWith(".svg")) return "image/svg+xml";
+		if (lower.endsWith(".zip")) return "application/zip";
+		if (lower.endsWith(".tar") || lower.endsWith(".gz")) return "application/gzip";
+		if (lower.endsWith(".pdf")) return "application/pdf";
+		if (lower.endsWith(".xml")) return "application/xml";
+		if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "text/yaml";
+		if (lower.endsWith(".bin")) return "application/octet-stream";
+		if (lower.endsWith(".exe")) return "application/octet-stream";
+		return "application/octet-stream";
 	}
 
 }
