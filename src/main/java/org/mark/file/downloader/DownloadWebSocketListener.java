@@ -40,22 +40,6 @@ public class DownloadWebSocketListener implements DownloadProgressListener {
 				task.getSourceUrl(),
 				resolveParentPath(task));
 	}
-	
-	@Override
-	@Deprecated
-	public void onTaskCompleted(DownloadTaskInfo task) {
-		this.webSocketManager.sendDownloadStatusEvent(
-				task.getTaskId(),
-				mapState(DownloadTaskStatus.COMPLETED),
-				task.getDownloadedBytes(),
-				task.getTotalBytes(),
-				task.getPartsCompleted(),
-				task.getPartsTotal(),
-				resolveFileName(task),
-				task.getErrorMessage(),
-				task.getSourceUrl(),
-				resolveParentPath(task));
-	}
 
 	@Override
 	public void onTaskFailed(DownloadTaskInfo task, String error) {

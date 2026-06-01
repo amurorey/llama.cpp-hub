@@ -33,7 +33,6 @@ public class UpdateDownloader {
     private volatile String currentVersion;
     private volatile String errorMessage;
 
-    // 
     private static final String I18N_CANCELLED = "update.download.cancelled";
     private static final String I18N_FAILED = "update.download.failed";
 

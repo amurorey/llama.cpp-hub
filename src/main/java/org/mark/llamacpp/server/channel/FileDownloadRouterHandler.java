@@ -292,24 +292,9 @@ public class FileDownloadRouterHandler extends SimpleChannelInboundHandler<FullH
 		v = v.trim();
 		v = v.replaceFirst("(?i)\\.gguf$", "");
 		v = v.trim();
-		return v.isEmpty() ? null : v;
+return v.isEmpty() ? null : v;
 	}
 
-//	private static String sanitizeFileName(String fileName) {
-//		String f = trimToNull(fileName);
-//		if (f == null) {
-//			return null;
-//		}
-//		try {
-//			f = Paths.get(f).getFileName().toString();
-//		} catch (Exception e) {
-//			return null;
-//		}
-//		f = f.replaceAll("[<>:\"/\\\\|?*]", "_");
-//		f = f.trim();
-//		return f.isEmpty() ? null : f;
-//	}
-    
 	/**
 	 * 	处理获取下载列表请求
 	 * @param ctx
