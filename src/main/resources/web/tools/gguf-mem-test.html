@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GGUF VRAM 估算测试</title>
+    <link rel="stylesheet" href="../css/index.css">
+    <link rel="stylesheet" href="../css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color, #f5f5f5);
+            color: var(--text-primary, #000);
+            min-height: 100vh;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 2rem;
+            background: var(--sidebar-bg, #fff);
+            border-bottom: 1px solid var(--border-color, #d9d9d9);
+        }
+
+        .page-header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .theme-toggle {
+            background: none;
+            border: 1px solid var(--border-color, #d9d9d9);
+            border-radius: var(--radius, 0.5rem);
+            padding: 0.4rem 0.8rem;
+            cursor: pointer;
+            color: var(--text-primary, #000);
+            font-size: 1rem;
+        }
+
+        .theme-toggle:hover {
+            background: var(--bg-color, #f5f5f5);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 1.5rem auto;
+            padding: 0 1rem;
+        }
+
+        .card {
+            background: var(--card-bg, #fff);
+            border: 1px solid var(--border-color, #d9d9d9);
+            border-radius: var(--radius, 0.5rem);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border-color, #d9d9d9);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 500;
+            margin-bottom: 0.35rem;
+            color: var(--text-secondary, #5f5f5f);
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-color, #d9d9d9);
+            border-radius: var(--radius, 0.5rem);
+            font-size: 0.9rem;
+            font-family: "Cascadia Code", "Fira Code", monospace;
+            background: var(--bg-color, #f5f5f5);
+            color: var(--text-primary, #000);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            border-color: var(--accent-color, #6366f1);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 60px;
+            line-height: 1.5;
+        }
+
+        .form-hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary, #5f5f5f);
+            margin-top: 0.25rem;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+        }
+
+        .device-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .device-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.25rem 0.6rem;
+            background: var(--accent-color, #6366f1);
+            color: #fff;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        .device-tag .remove {
+            cursor: pointer;
+            opacity: 0.7;
+            font-size: 0.9rem;
+        }
+
+        .device-tag .remove:hover {
+            opacity: 1;
+        }
+
+        .device-input-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .device-input-row input {
+            flex: 1;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: var(--radius, 0.5rem);
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent-color, #6366f1);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--bg-color, #f5f5f5);
+            color: var(--text-primary, #000);
+            border: 1px solid var(--border-color, #d9d9d9);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color, #d9d9d9);
+        }
+
+        .action-row {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1.25rem;
+        }
+
+        .result-box {
+            display: none;
+            margin-top: 0.5rem;
+            padding: 1rem;
+            border-radius: var(--radius, 0.5rem);
+            font-family: "Cascadia Code", "Fira Code", monospace;
+            font-size: 0.85rem;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-break: break-all;
+            background: var(--bg-color, #f5f5f5);
+            border: 1px solid var(--border-color, #d9d9d9);
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .result-box.show {
+            display: block;
+        }
+
+        .result-box.success {
+            border-left: 4px solid #10b981;
+        }
+
+        .result-box.error {
+            border-left: 4px solid #ef4444;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 0.4rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 9999;
+        }
+
+        .toast {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: var(--radius, 0.5rem);
+            background: var(--card-bg, #fff);
+            border: 1px solid var(--border-color, #d9d9d9);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            font-size: 0.9rem;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast.success {
+            border-left: 4px solid #10b981;
+        }
+
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #1a1a2e;
+            --sidebar-bg: #16213e;
+            --card-bg: #1f2940;
+            --border-color: #2d3748;
+            --text-primary: #e2e8f0;
+            --text-secondary: #a0aec0;
+            --accent-color: #818cf8;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page-header">
+        <h1><i class="fas fa-memory"></i> GGUF VRAM 估算测试</h1>
+        <button class="theme-toggle" onclick="toggleTheme()"><i class="fas fa-moon"></i></button>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-title"><i class="fas fa-info-circle"></i> API 说明</div>
+            <div style="font-size:0.9rem; line-height:1.6; color: var(--text-secondary, #5f5f5f);">
+                <p><strong>端点：</strong><code>POST /api/models/gguf-mem/estimate</code></p>
+                <p style="margin-top:0.5rem;">通过 gguf-mem 工具估算 HuggingFace 在线 GGUF 模型的显存占用。工具会自动下载模型元数据到本地缓存，再利用元数据进行显存估算。</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title"><i class="fas fa-cog"></i> 请求参数</div>
+
+            <div class="form-group">
+                <label for="model">Model URL *</label>
+                <input type="text" id="model" placeholder="https://huggingface.co/.../resolve/main/model.gguf">
+                <div class="form-hint">HuggingFace 模型文件的直接下载链接（.gguf）</div>
+            </div>
+
+            <div class="form-group">
+                <label for="cmd">Cmd</label>
+                <textarea id="cmd" placeholder="--ctx-size 4096 --flash-attn on --batch-size 512"></textarea>
+                <div class="form-hint">启动命令参数，与 llama.cpp 参数格式一致</div>
+            </div>
+
+            <div class="form-group">
+                <label for="extraParams">Extra Params</label>
+                <input type="text" id="extraParams" placeholder="-ctk f16 -ctv f16">
+                <div class="form-hint">额外参数，直接追加到命令末尾</div>
+            </div>
+
+            <div class="form-group">
+                <label>Device</label>
+                <div class="device-tags" id="deviceTags"></div>
+                <div class="device-input-row">
+                    <input type="text" id="deviceInput" placeholder="输入设备名后点击添加，如 cuda0、cuda1、host">
+                    <button class="btn btn-secondary" onclick="addDevice()"><i class="fas fa-plus"></i> 添加</button>
+                </div>
+                <div class="form-hint">GPU 设备列表，对应 --device 参数</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="mg">Main GPU (mg)</label>
+                    <input type="number" id="mg" placeholder="0" value="0">
+                    <div class="form-hint">主 GPU 索引，对应 --main-gpu</div>
+                </div>
+                <div class="form-group">
+                    <label for="nodeId">Node ID</label>
+                    <input type="text" id="nodeId" placeholder="留空表示本地执行">
+                    <div class="form-hint">远程节点 ID，留空则本地执行</div>
+                </div>
+            </div>
+
+            <div class="action-row">
+                <button class="btn btn-primary" id="submitBtn" onclick="submitEstimate()"><i class="fas fa-play"></i> 执行估算</button>
+                <button class="btn btn-secondary" onclick="clearForm()"><i class="fas fa-eraser"></i> 清空</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title"><i class="fas fa-terminal"></i> 响应结果</div>
+            <div class="result-box" id="resultBox"></div>
+        </div>
+
+        <div class="card">
+            <div class="card-title"><i class="fas fa-code"></i> 请求 JSON 预览</div>
+            <div class="result-box show" id="previewBox" style="font-size:0.8rem;"></div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        const deviceInput = document.getElementById('deviceInput');
+        const deviceTags = document.getElementById('deviceTags');
+        let devices = [];
+
+        deviceInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addDevice();
+            }
+        });
+
+        function addDevice() {
+            const val = deviceInput.value.trim();
+            if (!val || devices.includes(val)) return;
+            devices.push(val);
+            deviceInput.value = '';
+            renderDevices();
+        }
+
+        function removeDevice(idx) {
+            devices.splice(idx, 1);
+            renderDevices();
+        }
+
+        function renderDevices() {
+            deviceTags.innerHTML = devices.map((d, i) =>
+                `<span class="device-tag">${escapeHtml(d)} <span class="remove" onclick="removeDevice(${i})">&times;</span></span>`
+            ).join('');
+            updatePreview();
+        }
+
+        function buildPayload() {
+            const model = document.getElementById('model').value.trim();
+            const cmd = document.getElementById('cmd').value.trim();
+            const extraParams = document.getElementById('extraParams').value.trim();
+            const mg = document.getElementById('mg').value.trim();
+            const nodeId = document.getElementById('nodeId').value.trim();
+
+            const payload = { model, cmd, extraParams, device: [...devices] };
+            if (mg !== '') payload.mg = parseInt(mg, 10);
+            if (nodeId) payload.nodeId = nodeId;
+            return payload;
+        }
+
+        function updatePreview() {
+            const payload = buildPayload();
+            document.getElementById('previewBox').textContent = JSON.stringify(payload, null, 2);
+        }
+
+        document.querySelectorAll('input, textarea').forEach(el => {
+            el.addEventListener('input', updatePreview);
+        });
+
+        async function submitEstimate() {
+            const payload = buildPayload();
+
+            if (!payload.model) {
+                showToast('参数错误', 'model 为必填项', 'error');
+                return;
+            }
+            if (!payload.cmd && !payload.extraParams) {
+                showToast('参数错误', 'cmd 和 extraParams 至少填写一项', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('submitBtn');
+            const resultBox = document.getElementById('resultBox');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> 估算中...';
+            resultBox.className = 'result-box show';
+            resultBox.textContent = '估算中，请稍候（首次需下载模型元数据，可能需要较长时间）...';
+
+            const start = Date.now();
+
+            try {
+                const resp = await fetch('/api/models/gguf-mem/estimate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await resp.json();
+                const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+
+                if (data.success) {
+                    const vram = data.data && data.data.vram;
+                    if (vram) {
+                        resultBox.className = 'result-box show success';
+                        resultBox.textContent =
+                            `✅ 估算成功（耗时 ${elapsed}s）\n\n` +
+                            `预计显存: ${vram} MiB (${(parseInt(vram) / 1024).toFixed(2)} GiB)\n\n` +
+                            `完整响应:\n${JSON.stringify(data, null, 2)}`;
+                    } else {
+                        resultBox.className = 'result-box show success';
+                        resultBox.textContent =
+                            `⚠️ 请求成功但未解析到显存数据（耗时 ${elapsed}s）\n\n` +
+                            `完整响应:\n${JSON.stringify(data, null, 2)}`;
+                    }
+                } else {
+                    resultBox.className = 'result-box show error';
+                    resultBox.textContent =
+                        `❌ 估算失败（耗时 ${elapsed}s）\n\n${data.error || '未知错误'}\n\n` +
+                        `完整响应:\n${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (err) {
+                const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+                resultBox.className = 'result-box show error';
+                resultBox.textContent =
+                    `❌ 网络错误（耗时 ${elapsed}s）\n\n${err.message}\n\n请检查后端服务是否正常运行。`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-play"></i> 执行估算';
+            }
+        }
+
+        function clearForm() {
+            document.getElementById('model').value = '';
+            document.getElementById('cmd').value = '';
+            document.getElementById('extraParams').value = '';
+            document.getElementById('mg').value = '0';
+            document.getElementById('nodeId').value = '';
+            devices = [];
+            renderDevices();
+            const resultBox = document.getElementById('resultBox');
+            resultBox.className = 'result-box';
+            resultBox.textContent = '';
+        }
+
+        function showToast(title, msg, type) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `<strong>${escapeHtml(title)}</strong> ${escapeHtml(msg)}`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function toggleTheme() {
+            const html = document.documentElement;
+            const btn = document.querySelector('.theme-toggle i');
+            if (html.getAttribute('data-theme') === 'dark') {
+                html.removeAttribute('data-theme');
+                btn.className = 'fas fa-moon';
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                btn.className = 'fas fa-sun';
+            }
+        }
+
+        updatePreview();
+    </script>
+</body>
+
+</html>

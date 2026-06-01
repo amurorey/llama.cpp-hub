@@ -246,15 +246,36 @@ public class GGufMetaDataExtractor {
     // ------------------------------------------------------------------
     // Incremental Range download via NettyHttpUtils
     // ------------------------------------------------------------------
-    private static final long CHUNK_SIZE = 2L * 1024 * 1024;
-    private static final long MAX_DOWNLOAD = 32L * 1024 * 1024;
+    private static final long CHUNK_SIZE = 10L * 1024 * 1024;
+    private static final long MAX_DOWNLOAD = 30L * 1024 * 1024;
     private static final String META_CACHE_DIR = "meta";
 
-    static byte[] downloadHeader(String urlStr) throws Exception {
+    
+    public static String downloadHeader(String urlStr) throws Exception {
+    	// 判断url还是别的
+    	boolean isUrl = urlStr.startsWith("http://") || urlStr.startsWith("https://");
+		String base;
+		if (isUrl) {
+			base = urlStr.substring(urlStr.lastIndexOf('/') + 1);
+			int qm = base.indexOf('?');
+			if (qm >= 0) base = base.substring(0, qm);
+		} else {
+			base = new File(urlStr).getName();
+		}
+		
         Path metaDir = LlamaServer.getCachePath().resolve(META_CACHE_DIR);
         if (!Files.exists(metaDir)) {
             Files.createDirectories(metaDir);
         }
+        
+        String outPath = metaDir.resolve(base + ".meta").toString();
+        
+        File file = new File(outPath);
+		
+		if(file.exists()) {
+			return outPath;
+		}
+        
         Path tmpFile = Files.createTempFile(metaDir, "gguf-header-", ".bin");
         long downloaded = 0;
 
@@ -263,8 +284,7 @@ public class GGufMetaDataExtractor {
                 long start = downloaded;
                 long end = start + CHUNK_SIZE - 1;
 
-                System.err.printf("Downloading: bytes %d-%d (%.1f MiB)... ",
-                        start, end, CHUNK_SIZE / 1048576.0);
+                System.err.printf("Downloading: bytes " + start + "-" + end + " (" + (CHUNK_SIZE / 1048576.0) + " MiB)... ");
 
                 Response resp = NettyHttpUtils.request(urlStr)
                         .header("Range", "bytes=" + start + "-" + end)
@@ -277,15 +297,14 @@ public class GGufMetaDataExtractor {
                 int status = resp.statusCode();
                 if (status != 200 && status != 206) {
                     System.err.printf("FAILED (HTTP %d)\n", status);
-                    return null;
+                    return outPath;
                 }
 
                 byte[] chunk = resp.body();
                 Files.write(tmpFile, chunk, StandardOpenOption.APPEND);
                 downloaded += chunk.length;
 
-                System.err.printf("got %d bytes (total %d), status=%d\n",
-                        chunk.length, downloaded, status);
+                System.err.printf("got " + chunk.length + " bytes (total " + downloaded + "), status=" + status + "\n");
 
                 if (chunk.length < CHUNK_SIZE) {
                     System.err.println("Server returned less than requested, reached end of file.");
@@ -297,8 +316,9 @@ public class GGufMetaDataExtractor {
                     int[] nTensors = new int[1];
                     int[] nKv = new int[1];
                     if (validateHeader(allData, nTensors, nKv)) {
-                        System.err.printf("Header OK: %d KV, %d tensors\n", nKv[0], nTensors[0]);
-                        return allData;
+                        System.err.printf("Header OK: " + nKv[0] + " KV, " + nTensors[0] + " tensors\n");
+                        GGufMetaDataExtractor.writeMetaFile(allData, outPath);
+                        return outPath;
                     }
                 } catch (Exception e) {
                     // header incomplete, continue
@@ -361,7 +381,7 @@ public class GGufMetaDataExtractor {
     // ------------------------------------------------------------------
     // Process a GGUF buffer and write metadata-only file
     // ------------------------------------------------------------------
-    static void writeMetaFile(byte[] headerData, String outPath) throws Exception {
+    public static void writeMetaFile(byte[] headerData, String outPath) throws Exception {
         GGufReader r = new GGufReader(headerData);
 
         // Read and write header
@@ -421,51 +441,50 @@ public class GGufMetaDataExtractor {
             fos.write(output);
         }
 
-        System.err.printf("Wrote metadata: %s (%d bytes, %.1f KiB)\n",
-                outPath, output.length, output.length / 1024.0);
+        System.err.printf("Wrote metadata: " + outPath + " (" + output.length + " bytes, " + output.length / 1024.0 + " KiB)\n");
     }
 
-    // ------------------------------------------------------------------
-    // Main
-    // ------------------------------------------------------------------
-    public static void main(String[] args) throws Exception {
-        if (args.length < 1) {
-            System.err.println("Usage: java GGufMetaExtractor.java <input.gguf | https://.../model.gguf>");
-            //System.exit(1);
-        }
-        
-        args = new String[] { "https://huggingface.co/ReadyArt/Melody1437-27B-v0.3-GGUF/resolve/main/Melody1437-27B-v0.3-Q6_K.gguf" };
-
-        String input = args[0];
-        boolean isUrl = input.startsWith("http://") || input.startsWith("https://");
-
-        // Output is always in cache/meta/
-        Path metaDir = LlamaServer.getCachePath().resolve(META_CACHE_DIR);
-        if (!Files.exists(metaDir)) {
-            Files.createDirectories(metaDir);
-        }
-        String base = isUrl ? input.substring(input.lastIndexOf('/') + 1) : input;
-        int qm = base.indexOf('?');
-        if (qm >= 0) base = base.substring(0, qm);
-        String outPath = metaDir.resolve(base + ".meta.gguf").toString();
-
-        byte[] headerData;
-        if (isUrl) {
-            System.err.println("Fetching header from URL...");
-            headerData = downloadHeader(input);
-            if (headerData == null) System.exit(1);
-        } else {
-            System.err.println("Reading local file...");
-            try (FileInputStream fis = new FileInputStream(input);
-                 ByteArrayOutputStream buf = new ByteArrayOutputStream()) {
-                byte[] tmp = new byte[8192];
-                int n;
-                while ((n = fis.read(tmp)) != -1) buf.write(tmp, 0, n);
-                headerData = buf.toByteArray();
-            }
-        }
-
-        writeMetaFile(headerData, outPath);
-        System.err.println("Done.");
-    }
+//    // ------------------------------------------------------------------
+//    // Main
+//    // ------------------------------------------------------------------
+//    public static void main(String[] args) throws Exception {
+//        if (args.length < 1) {
+//            System.err.println("Usage: java GGufMetaExtractor.java <input.gguf | https://.../model.gguf>");
+//            //System.exit(1);
+//        }
+//        
+//        args = new String[] { "https://huggingface.co/ReadyArt/Melody1437-27B-v0.3-GGUF/resolve/main/Melody1437-27B-v0.3-Q6_K.gguf" };
+//
+//        String input = args[0];
+//        boolean isUrl = input.startsWith("http://") || input.startsWith("https://");
+//
+//        // Output is always in cache/meta/
+//        Path metaDir = LlamaServer.getCachePath().resolve(META_CACHE_DIR);
+//        if (!Files.exists(metaDir)) {
+//            Files.createDirectories(metaDir);
+//        }
+//        String base = isUrl ? input.substring(input.lastIndexOf('/') + 1) : input;
+//        int qm = base.indexOf('?');
+//        if (qm >= 0) base = base.substring(0, qm);
+//        String outPath = metaDir.resolve(base + ".meta.gguf").toString();
+//
+//        byte[] headerData;
+//        if (isUrl) {
+//            System.err.println("Fetching header from URL...");
+//            headerData = downloadHeader(input);
+//            if (headerData == null) System.exit(1);
+//        } else {
+//            System.err.println("Reading local file...");
+//            try (FileInputStream fis = new FileInputStream(input);
+//                 ByteArrayOutputStream buf = new ByteArrayOutputStream()) {
+//                byte[] tmp = new byte[8192];
+//                int n;
+//                while ((n = fis.read(tmp)) != -1) buf.write(tmp, 0, n);
+//                headerData = buf.toByteArray();
+//            }
+//        }
+//
+//        writeMetaFile(headerData, outPath);
+//        System.err.println("Done.");
+//    }
 }

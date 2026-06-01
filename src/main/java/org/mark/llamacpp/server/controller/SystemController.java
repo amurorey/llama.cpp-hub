@@ -26,6 +26,7 @@ import org.mark.llamacpp.server.exception.RequestMethodException;
 import org.mark.llamacpp.server.service.GpuService;
 import org.mark.llamacpp.server.service.ModelSamplingService;
 import org.mark.llamacpp.server.tools.FastFetchHelper;
+import org.mark.llamacpp.server.tools.GGufMetaDataExtractor;
 import org.mark.llamacpp.server.struct.ApiResponse;
 import org.mark.llamacpp.server.tools.JsonUtil;
 import org.mark.llamacpp.server.tools.ParamTool;
@@ -93,6 +94,11 @@ public class SystemController implements BaseController {
 		// llama-fit-params拟合参数API
 		if (uri.startsWith("/api/models/fit-params")) {
 			this.handleFitParamsRequest(ctx, request);
+			return true;
+		}
+		// gguf-mem显存估算API
+		if (uri.startsWith("/api/models/gguf-mem/estimate")) {
+			this.handleGgufMemEstimateRequest(ctx, request);
 			return true;
 		}
 		// 启用、禁用ollama兼容api
@@ -1934,6 +1940,139 @@ public class SystemController implements BaseController {
 		} catch (Exception e) {
 			logger.warn("远程文件系统浏览失败: nodeId={}, error={}", nodeId, e.getMessage());
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程文件系统浏览失败: " + e.getMessage()));
+		}
+	}
+
+	/**
+	 * 	
+	 * @param ctx
+	 * @param request
+	 * @throws RequestMethodException
+	 */
+	private void handleGgufMemEstimateRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+		this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
+
+		try {
+			String content = request.content().toString(CharsetUtil.UTF_8);
+			if (content == null || content.trim().isEmpty()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
+				return;
+			}
+
+			JsonElement root = JsonUtil.fromJson(content, JsonElement.class);
+			if (root == null || !root.isJsonObject()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体必须为JSON对象"));
+				return;
+			}
+			JsonObject obj = root.getAsJsonObject();
+			String nodeId = JsonUtil.getJsonString(obj, "nodeId", "");
+			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+				logger.info("[gguf-mem估算] 远程节点代理: nodeId={}, model={}", nodeId, JsonUtil.getJsonString(obj, "model", ""));
+				this.handleGgufMemEstimateRemote(ctx, nodeId, obj);
+				return;
+			}
+
+			String model = JsonUtil.getJsonString(obj, "model", "");
+			String cmd = JsonUtil.getJsonString(obj, "cmd", "");
+			String extraParams = JsonUtil.getJsonString(obj, "extraParams", "");
+			List<String> device = JsonUtil.getJsonStringList(obj.get("device"));
+			Integer mg = JsonUtil.getJsonInt(obj, "mg", null);
+
+			if (model != null) model = model.trim();
+			if (cmd != null) cmd = cmd.trim();
+			if (extraParams != null) extraParams = extraParams.trim();
+
+			if (model == null || model.isEmpty()) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需的model参数"));
+				return;
+			}
+			if ((cmd == null || cmd.isEmpty()) && (extraParams == null || extraParams.isEmpty())) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需的启动参数"));
+				return;
+			}
+
+			String combinedCmd = "";
+			if (cmd != null && !cmd.isEmpty()) combinedCmd = cmd;
+			if (extraParams != null && !extraParams.isEmpty()) {
+				combinedCmd = combinedCmd.isEmpty() ? extraParams : (combinedCmd + " " + extraParams);
+			}
+
+			if (device != null && !device.isEmpty()) {
+				if (device.size() == 1) {
+					String onlyOneDevice = device.get(0);
+					if (!"All".equals(onlyOneDevice)) {
+						combinedCmd += " --device " + onlyOneDevice;
+					}
+				} else {
+					combinedCmd += " --device ";
+					combinedCmd += ParamTool.quoteIfNeeded(String.join(",", device));
+				}
+			}
+			if (mg != null) {
+				combinedCmd += " --main-gpu " + mg;
+			}
+
+			logger.info("[gguf-mem估算] 本地执行: model={}, cmd={}", model, combinedCmd);
+			// 下载
+			String path = GGufMetaDataExtractor.downloadHeader(model);
+			// 执行计算
+			Map<String, String> result = LlamaServerManager.getInstance().handleFitParam(path, combinedCmd);
+			String output = result.get("output");
+			if (output == null || output.trim().isEmpty()) {
+				String error = result.get("error");
+				logger.warn("[gguf-mem显存估算] 执行失败: model={}, error={}", model, error);
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error != null ? error.trim() : "估算显存失败"));
+				return;
+			}
+			Map<String, Object> data = new HashMap<>();
+			Pattern devicePattern = Pattern.compile("(\\S+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)");
+			Matcher deviceMatcher = devicePattern.matcher(output);
+			long totalVram = 0;
+			boolean found = false;
+			while (deviceMatcher.find()) {
+				String deviceName = deviceMatcher.group(1);
+				if ("estimated".equalsIgnoreCase(deviceName) || "MiB".equalsIgnoreCase(deviceName)) {
+					continue;
+				}
+				long modelMem = Long.parseLong(deviceMatcher.group(2));
+				long contextMem = Long.parseLong(deviceMatcher.group(3));
+				long computeMem = Long.parseLong(deviceMatcher.group(4));
+				totalVram += modelMem + contextMem + computeMem;
+				found = true;
+			}
+			if (found) {
+				data.put("vram", String.valueOf(totalVram));
+				logger.info("[gguf-mem显存估算] 成功: model={}, vram={} MiB", model, totalVram);
+			} else {
+				Pattern pattern = Pattern.compile("^.*llama_init_from_model.*$", Pattern.MULTILINE);
+		        Matcher matcher = pattern.matcher(output);
+		        if (matcher.find()) {
+		            data.put("message", matcher.group(0));
+		        }
+			}
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
+		} catch (Exception e) {
+			logger.info("gguf-mem估算时发生错误", e);
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("估算显存失败: " + e.getMessage()));
+		}
+	}
+
+	private void handleGgufMemEstimateRemote(ChannelHandlerContext ctx, String nodeId, JsonObject body) {
+		try {
+			if (body != null) {
+				body.remove("nodeId");
+			}
+			NodeManager.HttpResult result = NodeManager.getInstance().callRemoteApi(
+					nodeId, "POST", "api/models/gguf-mem/estimate", body);
+			logger.info("[gguf-mem估算] 远程节点响应: nodeId={}, code={}", nodeId, result.getStatusCode());
+			if (result.isSuccess()) {
+				NodeManager.writeHttpResultToChannel(ctx, result, "[gguf-mem估算远程]");
+			} else {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: code=" + result.getStatusCode()));
+			}
+		} catch (Exception e) {
+			logger.warn("[gguf-mem估算] 远程节点调用异常: nodeId={}, error={}", nodeId, e.getMessage());
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("调用远程节点失败: " + e.getMessage()));
 		}
 	}
 }

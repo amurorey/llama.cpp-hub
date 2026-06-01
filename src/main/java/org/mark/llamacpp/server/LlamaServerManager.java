@@ -2,6 +2,7 @@ package org.mark.llamacpp.server;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -1808,6 +1809,115 @@ public class LlamaServerManager {
 		}
 		return list;
 	}
+	
+	
+	/**
+	 * 	重复的代码太多了，但是也没什么必要去管。
+	 * @param modelMetaDataPath
+	 * @param combinedCmd
+	 * @return
+	 * @throws Exception
+	 */
+	public Map<String, String> handleFitParam(String modelMetaDataPath, String combinedCmd) throws Exception {
+		List<String> cmdlist = ParamTool.splitCmdArgs(combinedCmd);
+		
+		Map<String, String> resultMap = new HashMap<>();
+		
+		File file = new File(modelMetaDataPath);
+		
+		if(!file.exists()) {
+			resultMap.put("output", "");
+			resultMap.put("error", "File not found: " + modelMetaDataPath);
+			return resultMap;
+		}
+		
+		String[] keysParam = {"--ctx-size", "--flash-attn", "--batch-size", "--ubatch-size", "--parallel", "--cache-type-k", "--cache-type-v", "--device", "--main-gpu", "--swa-full", "--split-mode", "--fit", "--spec-draft-type-k", "--spec-draft-type-v"};
+		
+		Map<String, String> cmdMap = new HashMap<>();
+		for(int i = 0; i < cmdlist.size(); i++) {
+			String param = cmdlist.get(i);
+			if(param.startsWith("--") && i + 1 < cmdlist.size()) {
+				// 如果当前参数的下一个不是参数名，而是值
+				if(!cmdlist.get(i + 1).startsWith("--")) {
+					cmdMap.put(param, cmdlist.get(i + 1));
+					i += 1;
+				}else {
+					cmdMap.put(param, param);
+				}
+			}
+		}
+		
+		// 找到可执行文件
+		String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
+
+		String platform;
+		if (os.contains("win")) {
+			platform = "win-x64";
+		} else if (os.contains("linux")) {
+			platform = "linux-x64";
+		} else {
+			throw new UnsupportedOperationException("Unsupported OS: " + os);
+		}
+
+		String exeName = platform.equals("win-x64") ? "gguf-mem.exe" : "gguf-mem";
+		String exePath = "/tools/gguf-mem/" + platform + "/" + exeName;
+
+		URL url = LlamaServerManager.class.getResource(exePath);
+		if(url == null) {
+			throw new FileNotFoundException("gguf-mem binary not found: " + exePath);
+		}
+		File exeFile = Paths.get(url.toURI()).toFile();
+		if (!exeFile.exists()) {
+			throw new FileNotFoundException("gguf-mem binary not found: " + exePath);
+		}
+
+		// Set executable permission
+		if (!exeFile.canExecute()) {
+			exeFile.setExecutable(true, false);
+			if (!exeFile.canExecute() && !os.contains("win")) {
+				try {
+					new ProcessBuilder("chmod", "+x", exePath).start().waitFor();
+				} catch (Exception e) {
+					logger.info("[gguf-mem] 增加可执行权限失败：", e);
+				}
+			}
+		}
+		// 拼接完整命令路径
+		String command = exeFile.getAbsolutePath();
+		command += " --model " + modelMetaDataPath;
+		command += " -fitp on";
+		//
+		// 针对--main-gpu做特殊处理
+		if(cmdMap.containsKey("--main-gpu")) {
+			// 如果是默认值-1，要改成0
+			if("-1".equals(cmdMap.get("--main-gpu"))) {
+				cmdMap.put("--main-gpu", "0");
+			}
+		}
+		// 针对--split-mode做特殊处理
+		if(cmdMap.containsKey("--split-mode")) {
+			cmdMap.put("-sm", cmdMap.get("--split-mode"));
+			cmdMap.remove("--split-mode");
+		}
+		for(String key : keysParam) {
+			// 如果有这个参数
+			if(cmdMap.containsKey(key)) {
+				String value = cmdMap.get(key);
+				if(key.equals(value)) {
+					command += " " + key + " ";
+				}else {
+					command += " " + key + " " + value;
+				}
+			}
+		}
+		logger.info("执行gguf-mem命令：{}", command);
+		// 执行命令
+		CommandLineRunner.CommandResult result = CommandLineRunner.execute(command, 30);
+		resultMap.put("output", result.getOutput() != null ? result.getOutput() : "");
+		resultMap.put("error", result.getError() != null ? result.getError() : "");
+		return resultMap;
+	}
+	
 	
 	/**
 	 * 	调用llama-fit-params
