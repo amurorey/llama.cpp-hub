@@ -121,10 +121,10 @@ jobs:
           mkdir -p build/classes/tools/gguf-mem/win-x64
           mkdir -p build/classes/tools/gguf-mem/linux-x64
           curl -L -o vram-win.zip https://github.com/IIIIIllllIIIIIlllll/llama.cpp/releases/download/gguf-mem-release/release-win-x64.zip
-          unzip -q vram-win.zip -d build/classes/tools/gguf-mem/win-x64
+          unzip -qo vram-win.zip -d build/classes/tools/gguf-mem/win-x64
           rm vram-win.zip
           curl -L -o vram-linux.zip https://github.com/IIIIIllllIIIIIlllll/llama.cpp/releases/download/gguf-mem-release/release-linux-x64.zip
-          unzip -q vram-linux.zip -d build/classes/tools/gguf-mem/linux-x64
+          unzip -qo vram-linux.zip -d build/classes/tools/gguf-mem/linux-x64
           rm vram-linux.zip
           echo "GGUF VRAM Calculator 工具下载完成"
           ls -la build/classes/tools/gguf-mem/win-x64/
@@ -141,7 +141,7 @@ jobs:
         run: |
           mkdir -p jre-linux
           curl -L -o jre-linux.zip https://github.com/IIIIIllllIIIIIlllll/Mini-JRE/releases/download/v1.0.0/mini-jre-21.08-linux-x64.zip
-          unzip -q jre-linux.zip -d jre-linux
+          unzip -qo jre-linux.zip -d jre-linux
           JRE_NAME=$(ls jre-linux | head -1)
           mv jre-linux/$JRE_NAME jre-linux/jre
           chmod +x jre-linux/jre/bin/java
@@ -153,7 +153,7 @@ jobs:
         run: |
           mkdir -p jre-win
           curl -L -o jre-win.zip https://github.com/IIIIIllllIIIIIlllll/Mini-JRE/releases/download/v1.0.0/mini-jre-21.08-win-x64.zip
-          unzip -q jre-win.zip -d jre-win
+          unzip -qo jre-win.zip -d jre-win
           JRE_NAME=$(ls jre-win | head -1)
           mv jre-win/$JRE_NAME jre-win/jre
           rm jre-win.zip
@@ -254,7 +254,7 @@ jobs:
                 fi
                 mkdir -p "$out_dir"
                 if [ "$extract_kind" = "zip" ]; then
-                  unzip -q "$asset" -d "$out_dir"
+                  unzip -qo "$asset" -d "$out_dir"
                 else
                   tar -xzf "$asset" -C "$out_dir"
                 fi
@@ -267,7 +267,7 @@ jobs:
                   if curl -fL -o "$extra_asset" "$extra_url"; then
                     local extra_out_dir="${extra_asset%.*}"
                     mkdir -p "$extra_out_dir"
-                    unzip -q "$extra_asset" -d "$extra_out_dir"
+                    unzip -qo "$extra_asset" -d "$extra_out_dir"
                     rm -f "$extra_asset"
                     flatten_one_level_dir "$extra_out_dir"
                     local extra_dir_var="${backend}_CUDART_DIR"
