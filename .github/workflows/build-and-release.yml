@@ -120,10 +120,10 @@ jobs:
         run: |
           mkdir -p build/classes/tools/gguf-mem/win-x64
           mkdir -p build/classes/tools/gguf-mem/linux-x64
-          curl -L -o vram-win.zip https://github.com/IIIIIllllIIIIIlllll/llama.cpp-vram-calculator/releases/download/releases/release-win-x64.zip
+          curl -L -o vram-win.zip https://github.com/IIIIIllllIIIIIlllll/llama.cpp/releases/download/gguf-mem-release/release-win-x64.zip
           unzip -q vram-win.zip -d build/classes/tools/gguf-mem/win-x64
           rm vram-win.zip
-          curl -L -o vram-linux.zip https://github.com/IIIIIllllIIIIIlllll/llama.cpp-vram-calculator/releases/download/releases/release-linux-x64.zip
+          curl -L -o vram-linux.zip https://github.com/IIIIIllllIIIIIlllll/llama.cpp/releases/download/gguf-mem-release/release-linux-x64.zip
           unzip -q vram-linux.zip -d build/classes/tools/gguf-mem/linux-x64
           rm vram-linux.zip
           echo "GGUF VRAM Calculator 工具下载完成"
