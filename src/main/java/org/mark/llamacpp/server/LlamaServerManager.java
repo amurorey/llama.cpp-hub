@@ -1352,10 +1352,8 @@ public class LlamaServerManager {
 
 		if (device != null && !device.isEmpty()) {
 			if (device.size() == 1) {
-				if (!"All".equals(device.get(0))) {
-					sb.append(" -sm none --device ");
-					sb.append(ParamTool.quoteIfNeeded(device.get(0)));
-				}
+				sb.append(" -sm none --device ");
+				sb.append(ParamTool.quoteIfNeeded(device.get(0)));
 			} else {
 				sb.append(" --device ");
 				sb.append(ParamTool.quoteIfNeeded(String.join(",", device)));

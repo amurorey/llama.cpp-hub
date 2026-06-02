@@ -1742,12 +1742,7 @@ public class SystemController implements BaseController {
 			}
 
 			if(device.size() == 1) {
-				String onlyOneDevice = device.get(0);
-				if("All".equals(onlyOneDevice)) {
-
-				}else {
-					combinedCmd += " --device " + onlyOneDevice;
-				}
+				combinedCmd += " --device " + device.get(0);
 			}else {
 				combinedCmd += " --device ";
 				combinedCmd += ParamTool.quoteIfNeeded(String.join(",", device));
@@ -1868,10 +1863,7 @@ public class SystemController implements BaseController {
 
 			if (device != null && !device.isEmpty()) {
 				if (device.size() == 1) {
-					String onlyOneDevice = device.get(0);
-					if (!"All".equals(onlyOneDevice)) {
-						combinedCmd += " --device " + onlyOneDevice;
-					}
+					combinedCmd += " --device " + device.get(0);
 				} else {
 					combinedCmd += " --device ";
 					combinedCmd += ParamTool.quoteIfNeeded(String.join(",", device));
@@ -1999,10 +1991,7 @@ public class SystemController implements BaseController {
 
 			if (device != null && !device.isEmpty()) {
 				if (device.size() == 1) {
-					String onlyOneDevice = device.get(0);
-					if (!"All".equals(onlyOneDevice)) {
-						combinedCmd += " --device " + onlyOneDevice;
-					}
+					combinedCmd += " --device " + device.get(0);
 				} else {
 					combinedCmd += " --device ";
 					combinedCmd += ParamTool.quoteIfNeeded(String.join(",", device));

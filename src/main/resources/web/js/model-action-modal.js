@@ -1139,7 +1139,7 @@ function buildLoadModelPayload(modal) {
         modelName,
         llamaBinPathSelect,
         enableVision,
-        device: isAllSelected ? ['All'] : selectedDevices,
+        device: selectedDevices,
         mg: getSelectedMainGpu(),
         cmd: cmdParts.join(' ').trim(),
         extraParams
