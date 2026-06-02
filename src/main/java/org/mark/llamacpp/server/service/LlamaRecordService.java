@@ -341,4 +341,52 @@ public class LlamaRecordService {
 	private void recordTiming(String modelId, Timing requestTiming) {
 		// No-op: recordRequest 在请求结束时统一写入，避免重复计数
 	}
+
+	/**
+	 * 删除指定模型的全部记录（文件 + 内存缓存），线程安全。
+	 *
+	 * @param modelId 模型唯一标识
+	 * @return 删除的记录数，模型不存在则返回 0
+	 */
+	public synchronized long deleteModelRecords(String modelId) {
+		if (modelId == null || modelId.trim().isEmpty()) return 0;
+		long deletedCount = 0;
+		Path binPath = Paths.get(RECORD_DIR + modelId + ".requests.bin");
+
+		// 从 logMap 移除并 close
+		BinaryRequestLog removed = this.logMap.remove(modelId);
+		if (removed != null) {
+			try {
+				deletedCount = removed.getRecordCount();
+				removed.close();
+			} catch (IOException ignore) {
+			}
+		}
+
+		// 若 logMap 中无打开实例，从文件读取记录数
+		if (deletedCount == 0 && Files.exists(binPath)) {
+			try (BinaryRequestLog log = new BinaryRequestLog(binPath)) {
+				deletedCount = log.getRecordCount();
+			} catch (IOException ignore) {
+			}
+		}
+
+		// 从 tokenSummaryCache 移除
+		this.tokenSummaryCache.remove(modelId);
+
+		// 扣减全局计数
+		if (deletedCount > 0) {
+			this.totalRecordCount.addAndGet(-deletedCount);
+		}
+
+		// 删除磁盘文件
+		try {
+			if (Files.exists(binPath)) {
+				Files.delete(binPath);
+			}
+		} catch (IOException ignore) {
+		}
+
+		return deletedCount;
+	}
 }
