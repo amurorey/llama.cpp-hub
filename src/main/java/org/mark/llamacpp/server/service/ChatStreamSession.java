@@ -45,7 +45,7 @@ public class ChatStreamSession {
 	private static final int INPUT_QUEUE_CAPACITY = 32;
 	private static final int MAX_SMALL_FIELD_BYTES = 1024 * 1024;
 	private static final int MAX_BUFFERED_FIELD_BYTES = 4 * 1024 * 1024;
-	private static final int DEFERRED_MEMORY_LIMIT = 1024 * 1024;
+	private static final int DEFERRED_MEMORY_LIMIT = 256 * 1024;
 
 	private final ChannelHandlerContext ctx;
 	private final OpenAIService openAIService;
