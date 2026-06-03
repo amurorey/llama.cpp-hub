@@ -13,6 +13,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -452,37 +453,227 @@ public class OpenAIService {
 				return;
 			}
 			JsonObject requestJson = JsonUtil.fromJson(content, JsonObject.class);
-			LlamaServerManager manager = LlamaServerManager.getInstance();
+			if (requestJson == null) {
+				this.sendOpenAIErrorResponseWithCleanup(ctx, 400, null, "Request body is not a valid JSON object", null);
+				return;
+			}
+
+			String bodyNodeId = JsonUtil.getJsonString(requestJson, "nodeId", "");
+			if (bodyNodeId != null && !bodyNodeId.isBlank()) {
+				requestJson.remove("nodeId");
+			}
+
 			String modelName = null;
 			if (!requestJson.has("model")) {
-				modelName = manager.getFirstModelName();
-				if (modelName == null) {
-					this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "No models are currently loaded", null);
-					return;
-				}
+				modelName = LlamaServerManager.getInstance().getFirstModelName();
 			} else {
 				modelName = requestJson.get("model").getAsString();
 			}
-			if (!manager.getLoadedProcesses().containsKey(modelName)) {
-				String resolved = manager.findModelIdByAlias(modelName);
-				if (resolved != null) {
-					modelName = resolved;
+
+			String targetUrl = null;
+			String remoteApiKey = null;
+			Integer localPort = null;
+
+			if (bodyNodeId != null && !bodyNodeId.isBlank()) {
+				logger.info("[OpenAIEmbed路由] 请求体指定 nodeId，直接路由远程节点: nodeId={}, model={}", bodyNodeId, modelName);
+				LlamaHubNode node = NodeManager.getInstance().getNode(bodyNodeId);
+				if (node == null || !node.isEnabled()) {
+					this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Remote node not found or disabled: " + bodyNodeId, null);
+					return;
+				}
+				targetUrl = node.getBaseUrl() + "/v1/embeddings";
+				remoteApiKey = node.getApiKey();
+			} else {
+				if (modelName != null && !modelName.isBlank()) {
+					LlamaServerManager manager = LlamaServerManager.getInstance();
+					if (!manager.getLoadedProcesses().containsKey(modelName)) {
+						String resolved = manager.findModelIdByAlias(modelName);
+						if (resolved != null) {
+							modelName = resolved;
+						}
+					}
+					if (manager.getLoadedProcesses().containsKey(modelName)) {
+						localPort = manager.getModelPort(modelName);
+						if (localPort != null) {
+							targetUrl = String.format("http://localhost:%d/v1/embeddings", localPort.intValue());
+						}
+					}
+				}
+				if (targetUrl == null && modelName != null && !modelName.isBlank()) {
+					logger.info("[OpenAIEmbed路由] 本地未找到模型，开始搜索远程节点: model={}", modelName);
+					String[] remote = this.resolveEmbeddingsFromRemoteNodes(modelName);
+					if (remote != null) {
+						targetUrl = remote[0];
+						remoteApiKey = remote[1];
+					}
 				}
 			}
-			if (!manager.getLoadedProcesses().containsKey(modelName)) {
-				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
+
+			if (targetUrl == null) {
+				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + (modelName != null ? modelName : "unknown"), "model");
 				return;
 			}
-			Integer modelPort = manager.getModelPort(modelName);
-			if (modelPort == null) {
-				this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, "Model port not found: " + modelName, null);
-				return;
+
+			if (localPort != null) {
+				this.forwardRequestToLlamaCpp(ctx, request, modelName, localPort, "/v1/embeddings", false, JsonUtil.toJson(requestJson));
+			} else {
+				this.forwardEmbeddingsToRemote(ctx, request, modelName, targetUrl, remoteApiKey, requestJson);
 			}
-			this.forwardRequestToLlamaCpp(ctx, request, modelName, modelPort, "/v1/embeddings", false, request.content().toString(StandardCharsets.UTF_8));
 		} catch (Exception e) {
 			logger.info("处理OpenAI嵌入请求时发生错误", e);
 			this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, e.getMessage(), null);
 		}
+	}
+
+	private void forwardEmbeddingsToRemote(ChannelHandlerContext ctx, FullHttpRequest request,
+			String modelName, String targetUrl, String remoteApiKey, JsonObject bodyJson) {
+		byte[] bodyBytes = JsonUtil.toJson(bodyJson).getBytes(StandardCharsets.UTF_8);
+		Map<String, String> headers = new HashMap<>();
+		for (Map.Entry<String, String> entry : request.headers()) {
+			headers.put(entry.getKey(), entry.getValue());
+		}
+		HttpMethod method = request.method();
+
+		worker.execute(() -> {
+			String requestId = ModelRequestTracker.getInstance().createRequest(modelName, "/v1/embeddings");
+			HttpURLConnection connection = null;
+			try {
+				connection = (HttpURLConnection) URI.create(targetUrl).toURL().openConnection();
+				if (connection instanceof javax.net.ssl.HttpsURLConnection) {
+					NodeManager.trustAllCerts((javax.net.ssl.HttpsURLConnection) connection);
+				}
+				connection.setRequestMethod(method.name());
+				connection.setConnectTimeout(36000 * 1000);
+				connection.setReadTimeout(36000 * 1000);
+				for (Map.Entry<String, String> entry : headers.entrySet()) {
+					if (!entry.getKey().equalsIgnoreCase("Connection") &&
+						!entry.getKey().equalsIgnoreCase("Content-Length") &&
+						!entry.getKey().equalsIgnoreCase("Transfer-Encoding")) {
+						connection.setRequestProperty(entry.getKey(), entry.getValue());
+					}
+				}
+				if (remoteApiKey != null && !remoteApiKey.isBlank()) {
+					connection.setRequestProperty("Authorization", "Bearer " + remoteApiKey);
+				}
+				connection.setDoOutput(true);
+				try (OutputStream os = connection.getOutputStream()) {
+					os.write(bodyBytes);
+				}
+
+				int responseCode = connection.getResponseCode();
+				ModelRequestTracker.getInstance().updatePhase(requestId, ActiveRequest.Phase.GENERATION);
+
+				String responseBody;
+				if (responseCode >= 200 && responseCode < 300) {
+					try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+						StringBuilder sb = new StringBuilder();
+						String line;
+						while ((line = br.readLine()) != null) {
+							sb.append(line);
+						}
+						responseBody = sb.toString();
+					}
+				} else {
+					try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
+						StringBuilder sb = new StringBuilder();
+						String line;
+						while ((line = br.readLine()) != null) {
+							sb.append(line);
+						}
+						responseBody = sb.toString();
+					}
+					FullHttpResponse errResp = new DefaultFullHttpResponse(
+						HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(responseCode));
+					errResp.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
+					byte[] errBytes = responseBody.getBytes(StandardCharsets.UTF_8);
+					errResp.headers().set(HttpHeaderNames.CONTENT_LENGTH, errBytes.length);
+					errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+					errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+					errResp.content().writeBytes(errBytes);
+					ctx.writeAndFlush(errResp).addListener(ChannelFutureListener.CLOSE);
+					return;
+				}
+
+				JsonObject parsed = JsonUtil.tryParseObject(responseBody);
+				if (parsed != null && parsed.has("timings")) {
+					try {
+						Timing timing = JsonUtil.fromJson(parsed.get("timings"), Timing.class);
+						ModelRequestTracker.getInstance().updateTiming(requestId, timing);
+					} catch (Exception ignore) {}
+				}
+				LlamaRecordService.getInstance().handleStream(modelName, responseBody, requestId);
+
+				FullHttpResponse response = new DefaultFullHttpResponse(
+					HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(responseCode));
+				response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
+				byte[] respBytes = responseBody.getBytes(StandardCharsets.UTF_8);
+				response.headers().set(HttpHeaderNames.CONTENT_LENGTH, respBytes.length);
+				response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+				response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+				response.content().writeBytes(respBytes);
+				ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+			} catch (Exception e) {
+				logger.info("转发嵌入请求到远程节点时发生错误", e);
+				this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, e.getMessage(), null);
+			} catch (Throwable t) {
+				logger.error("虚拟线程异常已兜底: {}", t.getMessage(), t);
+			} finally {
+				ModelRequestTracker.getInstance().removeRequest(requestId);
+				if (connection != null) {
+					connection.disconnect();
+				}
+			}
+		});
+	}
+
+	private String[] resolveEmbeddingsFromRemoteNodes(String modelName) {
+		NodeManager nodeManager = NodeManager.getInstance();
+		List<LlamaHubNode> enabledNodes = nodeManager.listEnabledNodes();
+		logger.info("[OpenAIEmbed路由] 远程节点列表: count={}", enabledNodes.size());
+
+		for (LlamaHubNode node : enabledNodes) {
+			logger.info("[OpenAIEmbed路由] 检查远程节点: nodeId={}, baseUrl={}", node.getNodeId(), node.getBaseUrl());
+			try {
+				NodeManager.HttpResult result = nodeManager.callRemoteApi(node.getNodeId(), "GET", "/v1/models", null);
+				if (!result.isSuccess()) {
+					logger.warn("[OpenAIEmbed路由] 远程节点请求失败: nodeId={}, body={}", node.getNodeId(), result.getBody());
+					continue;
+				}
+
+				JsonObject root = JsonUtil.fromJson(result.getBody(), JsonObject.class);
+				if (root == null) continue;
+
+				if (root.has("models") && root.get("models").isJsonArray()) {
+					JsonArray remoteModels = root.getAsJsonArray("models");
+					for (JsonElement el : remoteModels) {
+						if (!el.isJsonObject()) continue;
+						JsonObject m = el.getAsJsonObject();
+						String remoteKey = JsonUtil.getJsonString(m, "model");
+						if (remoteKey.isEmpty()) remoteKey = JsonUtil.getJsonString(m, "name");
+						if (modelName.equals(remoteKey)) {
+							logger.info("[OpenAIEmbed路由] 匹配成功: model={}, nodeId={}", modelName, node.getNodeId());
+							return new String[]{ node.getBaseUrl() + "/v1/embeddings", node.getApiKey() };
+						}
+					}
+				}
+				if (root.has("data") && root.get("data").isJsonArray()) {
+					JsonArray dataArr = root.getAsJsonArray("data");
+					for (JsonElement el : dataArr) {
+						if (!el.isJsonObject()) continue;
+						JsonObject d = el.getAsJsonObject();
+						String id = JsonUtil.getJsonString(d, "id", "");
+						if (modelName.equals(id)) {
+							logger.info("[OpenAIEmbed路由] data匹配成功: model={}, nodeId={}", modelName, node.getNodeId());
+							return new String[]{ node.getBaseUrl() + "/v1/embeddings", node.getApiKey() };
+						}
+					}
+				}
+			} catch (Exception e) {
+				logger.warn("[OpenAIEmbed路由] 异常: nodeId={}, error={}", node.getNodeId(), e.getMessage());
+			}
+		}
+		logger.warn("[OpenAIEmbed路由] 所有远程节点均未找到: model={}", modelName);
+		return null;
 	}
 	
 	/**

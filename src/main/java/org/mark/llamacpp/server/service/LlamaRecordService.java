@@ -296,7 +296,12 @@ public class LlamaRecordService {
 		try {
 			RequestLogRecord record = new RequestLogRecord();
 			record.startTime = System.currentTimeMillis();
-			record.endpoint = toEndpointByte("");
+			if (requestId != null) {
+				ActiveRequest activeReq = ModelRequestTracker.getInstance().getActiveRequest(requestId);
+				record.endpoint = activeReq != null ? toEndpointByte(activeReq.getEndpoint()) : toEndpointByte("");
+			} else {
+				record.endpoint = toEndpointByte("");
+			}
 			record.status = 1;
 			record.phase = 1;
 			record.cacheN = getJsonInt(usage, "prompt_cache_hit_tokens", 0);
