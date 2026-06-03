@@ -16,6 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import com.google.gson.Gson;
+import org.mark.llamacpp.server.tools.JsonUtil;
 import com.google.gson.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,7 @@ public class DownloadTaskManager implements Closeable {
 
 	private static final Logger logger = LoggerFactory.getLogger(DownloadTaskManager.class);
 
-	private static final Gson GSON = new Gson();
+	private static final Gson GSON = JsonUtil.gson();
 
 	private static final DownloadTaskManager INSTANCE;
 	static {

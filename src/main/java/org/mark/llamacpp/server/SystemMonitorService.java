@@ -3,6 +3,7 @@ package org.mark.llamacpp.server;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 
+import org.mark.llamacpp.server.tools.JsonUtil;
 import org.mark.llamacpp.server.websocket.WebSocketManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,7 +49,7 @@ public class SystemMonitorService {
         this.scriptPath = System.getProperty("user.dir") + File.separator + "system_monitor_json.sh";
         this.webSocketManager = WebSocketManager.getInstance();
         this.scheduler = Executors.newScheduledThreadPool(1);
-        this.gson = new Gson();
+        this.gson = JsonUtil.gson();
         
         // 检查脚本文件是否存在
         File scriptFile = new File(scriptPath);

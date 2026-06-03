@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.mark.llamacpp.server.LlamaServer;
+import org.mark.llamacpp.server.tools.JsonUtil;
 import org.mark.llamacpp.server.struct.CharactorDataStruct;
 
 import com.google.gson.Gson;
@@ -21,7 +22,7 @@ import com.google.gson.Gson;
  */
 public class CompletionService {
 	
-	private static final Gson gson = new Gson();
+	private static final Gson gson = JsonUtil.gson();
 	private static final long MAX_CHAT_UPLOAD_BYTES = 16L * 1024L * 1024L;
 	private static final long MAX_AVATAR_UPLOAD_BYTES = 1L * 1024L * 1024L;
 	private static final String[] AVATAR_EXTS = new String[] { "png", "jpg", "jpeg", "gif", "webp" };

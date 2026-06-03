@@ -12,6 +12,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import org.mark.llamacpp.server.LlamaServer;
+import org.mark.llamacpp.server.tools.JsonUtil;
 import org.mark.llamacpp.server.service.CompletionService;
 import org.mark.llamacpp.server.struct.CharactorDataStruct;
 
@@ -46,7 +47,7 @@ public class CompletionRouterHandler extends SimpleChannelInboundHandler<FullHtt
 	/**
 	 * 	
 	 */
-	private static final Gson gson = new Gson();
+	private static final Gson gson = JsonUtil.gson();
 
 	private static final long MAX_UPLOAD_BYTES = 16L * 1024L * 1024L;
 	private static final long MAX_AVATAR_UPLOAD_BYTES = 1L * 1024L * 1024L;

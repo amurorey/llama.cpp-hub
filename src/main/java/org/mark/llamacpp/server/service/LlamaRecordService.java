@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.mark.llamacpp.record.BinaryRequestLog;
+import org.mark.llamacpp.server.tools.JsonUtil;
 import org.mark.llamacpp.record.RequestLogRecord;
 import org.mark.llamacpp.server.struct.ActiveRequest;
 import org.mark.llamacpp.server.struct.Timing;
@@ -30,7 +31,7 @@ public class LlamaRecordService {
     static final Logger logger = LoggerFactory.getLogger(LlamaRecordService.class);
 	
 	private static final LlamaRecordService INSTANCE = new LlamaRecordService();
-	private final Gson gson = new Gson();
+	private final Gson gson = JsonUtil.gson();
 	private static final String RECORD_DIR = "cache/record/";
 	private final Map<String, BinaryRequestLog> logMap = new ConcurrentHashMap<>();
 	private final AtomicLong totalRecordCount = new AtomicLong(0);

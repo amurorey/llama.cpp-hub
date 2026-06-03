@@ -898,9 +898,9 @@ import com.google.gson.*;
         String name, List<Long> shape, int tensorType, long dataOffset, long dataSize
     ) {}
 
-    private static record ParsedGguf(
-        Map<String, Object> meta,
-        Map<String, Integer> kvTypes,
-        List<TensorInfo> tensors
-    ) {}
+//    private static record ParsedGguf(
+//        Map<String, Object> meta,
+//        Map<String, Integer> kvTypes,
+//        List<TensorInfo> tensors
+//    ) {}
 }

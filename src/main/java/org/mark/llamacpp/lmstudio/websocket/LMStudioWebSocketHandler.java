@@ -2,6 +2,7 @@ package org.mark.llamacpp.lmstudio.websocket;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.mark.llamacpp.server.tools.JsonUtil;
 import com.google.gson.Gson;
 
 import java.security.SecureRandom;
@@ -41,7 +42,7 @@ public class LMStudioWebSocketHandler extends SimpleChannelInboundHandler<WebSoc
     private boolean connected = false;
     
     // JSON解析器
-    private static final Gson gson = new Gson();
+    private static final Gson gson = JsonUtil.gson();
     
     private static final Pattern QUANT_BITS = Pattern.compile("(?i)^Q(\\d+).*$");
     private static final Pattern PARAMS_B = Pattern.compile("(?i)(\\d+(?:\\.\\d+)?)B");

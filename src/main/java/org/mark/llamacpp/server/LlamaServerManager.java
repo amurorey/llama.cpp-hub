@@ -18,6 +18,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import org.mark.llamacpp.server.tools.JsonUtil;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
@@ -65,7 +66,7 @@ public class LlamaServerManager {
 	/**
 	 * 	
 	 */
-	private static final Gson gson = new Gson();
+	private static final Gson gson = JsonUtil.gson();
 	
 	/**
 	 * 	这是锁。

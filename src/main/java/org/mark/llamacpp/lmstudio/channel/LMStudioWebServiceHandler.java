@@ -6,6 +6,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.google.gson.Gson;
+import org.mark.llamacpp.server.tools.JsonUtil;
 import com.google.gson.JsonObject;
 
 import io.netty.buffer.ByteBuf;
@@ -26,7 +27,7 @@ import io.netty.util.ReferenceCountUtil;
 public class LMStudioWebServiceHandler extends SimpleChannelInboundHandler<FullHttpRequest> {
 	
 	private static final ExecutorService async = Executors.newVirtualThreadPerTaskExecutor();
-	private static final Gson gson = new Gson();
+	private static final Gson gson = JsonUtil.gson();
 	
 	@Override
 	protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) throws Exception {

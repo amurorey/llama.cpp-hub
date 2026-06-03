@@ -466,7 +466,7 @@ public class LlamaServer {
     //##############################################################################################################################
     
     
-    private static final Gson GSON = new Gson();
+    private static final Gson GSON = JsonUtil.gson();
     
     public static final PrintStream out = System.out;
     

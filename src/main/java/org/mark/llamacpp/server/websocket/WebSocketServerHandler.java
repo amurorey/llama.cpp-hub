@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonSyntaxException;
 
+import org.mark.llamacpp.server.tools.JsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +30,7 @@ public class WebSocketServerHandler extends SimpleChannelInboundHandler<WebSocke
     private boolean connected = false;
     
     // JSON解析器
-    private static final Gson gson = new Gson();
+    private static final Gson gson = JsonUtil.gson();
     
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, WebSocketFrame frame) throws Exception {

@@ -16,6 +16,8 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.mark.llamacpp.server.tools.JsonUtil;
+
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
@@ -47,7 +49,7 @@ import com.google.gson.JsonObject;
 public class LlamaCppService {
 	
 	private static final Logger logger = LoggerFactory.getLogger(LlamaCppService.class);
-	private static final Gson gson = new Gson();
+	private static final Gson gson = JsonUtil.gson();
 	
 	private final Map<ChannelHandlerContext, HttpURLConnection> channelConnectionMap = new HashMap<>();
 	

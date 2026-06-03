@@ -55,7 +55,7 @@ import org.mark.llamacpp.server.LlamaCppProcess;
 public class AnthropicService {
 
     private static final Logger logger = LoggerFactory.getLogger(AnthropicService.class);
-    private static final Gson gson = new Gson();
+    private static final Gson gson = JsonUtil.gson();
     private static final String ANTHROPIC_API_KEY = "123456";
     private static final javax.net.ssl.SSLSocketFactory TRUST_ALL_SOCKET_FACTORY = createTrustAllSocketFactory();
 	/**

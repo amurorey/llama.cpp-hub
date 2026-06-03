@@ -24,6 +24,10 @@ public class JsonUtil {
 	
 	//private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 	private static final Gson gson = new Gson();
+
+	public static Gson gson() {
+		return gson;
+	}
 	
 	
 	public static String toJson(Object obj) {
