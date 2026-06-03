@@ -37,7 +37,6 @@ import java.util.stream.Stream;
 import org.mark.llamacpp.gguf.GGUFBundle;
 import org.mark.llamacpp.gguf.GGUFMetaData;
 import org.mark.llamacpp.gguf.GGUFModel;
-import org.mark.llamacpp.gguf.GGUFMetaDataReader;
 import org.mark.llamacpp.server.struct.ApiResponse;
 import org.mark.llamacpp.server.struct.ModelPathConfig;
 import org.mark.llamacpp.server.struct.ModelPathDataStruct;
@@ -462,13 +461,9 @@ public class LlamaServerManager {
 		}
 
 		String chatTemplate = "";
-		try {
-			if (primaryFile != null && primaryFile.exists() && primaryFile.isFile()) {
-				Map<String, Object> full = GGUFMetaDataReader.read(primaryFile);
-				Object tpl = full == null ? null : full.get("tokenizer.chat_template");
-				if (tpl != null) chatTemplate = String.valueOf(tpl);
-			}
-		} catch (Exception ignore) {
+		if (primaryMeta != null) {
+			String tpl = primaryMeta.getChatTemplate();
+			if (tpl != null) chatTemplate = tpl;
 		}
 
 		String tplLower = safeLower(chatTemplate);

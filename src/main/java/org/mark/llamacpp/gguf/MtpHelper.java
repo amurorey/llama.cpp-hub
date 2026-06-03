@@ -75,27 +75,79 @@ import com.google.gson.*;
      * @return MtpInfo with detection results, or {@link MtpInfo#none()} if no MTP
      */
     public static MtpInfo detectMtpInfo(File file) {
-        Map<String, Object> meta = readMetadata(file);
-        if (meta.isEmpty()) return MtpInfo.none();
+        try {
+            Map<String, Object> meta = readMtpMetadata(file);
+            if (meta.isEmpty()) return MtpInfo.none();
 
-        String arch = (String) meta.get("general.architecture");
-        if (arch == null) return MtpInfo.none();
-        if (!"qwen35".equals(arch) && !"qwen35moe".equals(arch)) return MtpInfo.none();
+            String arch = (String) meta.get("general.architecture");
+            if (arch == null) return MtpInfo.none();
+            if (!"qwen35".equals(arch) && !"qwen35moe".equals(arch)) return MtpInfo.none();
 
-        Number blockCount = (Number) meta.get(arch + ".block_count");
-        Number nextn = (Number) meta.get(arch + ".nextn_predict_layers");
-        if (nextn == null || nextn.intValue() <= 0) return MtpInfo.none();
-        if (blockCount == null) return MtpInfo.none();
+            Number blockCount = (Number) meta.get(arch + ".block_count");
+            Number nextn = (Number) meta.get(arch + ".nextn_predict_layers");
+            if (nextn == null || nextn.intValue() <= 0) return MtpInfo.none();
+            if (blockCount == null) return MtpInfo.none();
 
-        int bc = blockCount.intValue();
-        int nn = nextn.intValue();
-        int trunk = bc - nn;
+            int bc = blockCount.intValue();
+            int nn = nextn.intValue();
+            int trunk = bc - nn;
 
-        List<String> prefixes = new ArrayList<>(nn);
-        for (int i = 0; i < nn; i++) {
-            prefixes.add("blk." + (trunk + i) + ".");
+            List<String> prefixes = new ArrayList<>(nn);
+            for (int i = 0; i < nn; i++) {
+                prefixes.add("blk." + (trunk + i) + ".");
+            }
+            return new MtpInfo(true, arch, bc, nn, trunk, prefixes);
+        } catch (Exception e) {
+            return MtpInfo.none();
         }
-        return new MtpInfo(true, arch, bc, nn, trunk, prefixes);
+    }
+
+    /**
+     * Lightweight metadata reader that only extracts keys needed for MTP detection.
+     * Skips large values like tokenizer.chat_template to avoid humongous allocations.
+     */
+    static Map<String, Object> readMtpMetadata(File file) throws IOException {
+        if (file == null || !file.exists() || !file.isFile()) {
+            return Collections.emptyMap();
+        }
+        MappedByteBuffer mappedBuffer = null;
+        try (RandomAccessFile raf = new RandomAccessFile(file, "r");
+             FileChannel channel = raf.getChannel()) {
+            long size = channel.size();
+            long mapSize = Math.min(size, 64L * 1024 * 1024);
+            mappedBuffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, mapSize);
+            mappedBuffer.order(ByteOrder.LITTLE_ENDIAN);
+            skipMagic(mappedBuffer);
+            mappedBuffer.getInt(); // version
+            mappedBuffer.getLong(); // tensor count (skip)
+            long kvCount = readULE64(mappedBuffer);
+
+            Map<String, Object> metadata = new HashMap<>();
+            String arch = null;
+            String archBlockCountKey = null;
+            String archNextnKey = null;
+
+            for (long i = 0; i < kvCount; i++) {
+                String key = readString(mappedBuffer);
+                int type = mappedBuffer.getInt();
+
+                if ("general.architecture".equals(key)) {
+                    arch = readString(mappedBuffer);
+                    archBlockCountKey = arch + ".block_count";
+                    archNextnKey = arch + ".nextn_predict_layers";
+                    metadata.put(key, arch);
+                } else if (archBlockCountKey != null && archBlockCountKey.equals(key)) {
+                    metadata.put(key, readValue(mappedBuffer, type));
+                } else if (archNextnKey != null && archNextnKey.equals(key)) {
+                    metadata.put(key, readValue(mappedBuffer, type));
+                } else {
+                    skipValue(mappedBuffer, type);
+                }
+            }
+            return metadata;
+        } finally {
+            unmap(mappedBuffer);
+        }
     }
 
     /**

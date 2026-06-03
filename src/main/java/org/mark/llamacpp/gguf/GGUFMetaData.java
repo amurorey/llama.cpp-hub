@@ -48,11 +48,13 @@ public class GGUFMetaData {
     private final boolean supportsAudio;
 
     private final boolean supportsVision;
+
+    private final String chatTemplate;
     
     
     private final MtpInfo mtpInfo;
 
-    private GGUFMetaData(String fileName, String filePath, String architecture, Integer contextLength, Integer fileType, String baseName, String name, String sizeLabel, boolean supportsAudio, boolean supportsVision, MtpInfo mtpInfo) {
+    private GGUFMetaData(String fileName, String filePath, String architecture, Integer contextLength, Integer fileType, String baseName, String name, String sizeLabel, boolean supportsAudio, boolean supportsVision, String chatTemplate, MtpInfo mtpInfo) {
         this.fileName = fileName;
         this.filePath = filePath;
         this.architecture = architecture;
@@ -63,6 +65,7 @@ public class GGUFMetaData {
         this.sizeLabel = sizeLabel;
         this.supportsAudio = supportsAudio;
         this.supportsVision = supportsVision;
+        this.chatTemplate = chatTemplate;
         this.mtpInfo = mtpInfo;
     }
 
@@ -79,6 +82,7 @@ public class GGUFMetaData {
         String sizeLabel = null;
         boolean supportsAudio = false;
         boolean supportsVision = false;
+        String chatTemplate = null;
 
         // 使用 BufferedInputStream 提高读取性能
         try (FileInputStream fis = new FileInputStream(file);
@@ -148,6 +152,10 @@ public class GGUFMetaData {
                         supportsVision = true;
                     }
                     handled = true;
+                } else if ("tokenizer.chat_template".equals(key)) {
+                    Object value = readValue(dis, valueType);
+                    chatTemplate = value instanceof String ? (String) value : null;
+                    handled = true;
                 }
 
                 if (!handled) {
@@ -160,7 +168,7 @@ public class GGUFMetaData {
             return null;
         }
 
-        return new GGUFMetaData(file.getName(), file.getAbsolutePath(), architecture, contextLength, fileType, baseName, name, sizeLabel, supportsAudio, supportsVision, MtpHelper.detectMtpInfo(file));
+        return new GGUFMetaData(file.getName(), file.getAbsolutePath(), architecture, contextLength, fileType, baseName, name, sizeLabel, supportsAudio, supportsVision, chatTemplate, MtpHelper.detectMtpInfo(file));
     }
 
     public String getFileName() {
@@ -205,6 +213,10 @@ public class GGUFMetaData {
 
     public MtpInfo getMtpInfo() {
         return mtpInfo;
+    }
+
+    public String getChatTemplate() {
+        return chatTemplate;
     }
     
     public String getQuantizationType() {

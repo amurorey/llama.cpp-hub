@@ -1,6 +1,5 @@
 package org.mark.llamacpp.server.controller;
 
-import java.io.File;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -9,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.mark.llamacpp.gguf.GGUFMetaData;
-import org.mark.llamacpp.gguf.GGUFMetaDataReader;
 import org.mark.llamacpp.gguf.GGUFModel;
 import org.mark.llamacpp.server.ConfigManager;
 import org.mark.llamacpp.server.LlamaCppProcess;
@@ -956,13 +954,10 @@ public class ModelInfoController implements BaseController {
 			String chatTemplate = "";
 			GGUFMetaData primary = model.getPrimaryModel();
 			if (primary != null) {
-				Map<String, Object> m = GGUFMetaDataReader.read(new File(primary.getFilePath()));
-				if (m != null) {
-					Object tpl = m.get("tokenizer.chat_template");
-					if (tpl != null) {
-						exists = true;
-						chatTemplate = String.valueOf(tpl);
-					}
+				String tpl = primary.getChatTemplate();
+				if (tpl != null) {
+					exists = true;
+					chatTemplate = tpl;
 				}
 			}
 
