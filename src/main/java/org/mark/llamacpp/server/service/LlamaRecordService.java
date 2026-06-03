@@ -37,10 +37,11 @@ public class LlamaRecordService {
 		return INSTANCE;
 	}
 
-	public LlamaRecordService() {
+ public LlamaRecordService() {
 		try {
 			Files.createDirectories(Paths.get(RECORD_DIR));
 			this.migrateOldLogs();
+			this.migrateHeaderV1toV2();
 			this.loadTotalRecordCount();
 		} catch (IOException e) {
 			e.printStackTrace();
@@ -70,6 +71,8 @@ public class LlamaRecordService {
 					entry.setTotalPredictedMs(log.getTotalPredictedMs());
 					entry.setTotalDraftTokens(log.getTotalDraftTokens());
 					entry.setTotalDraftAccepted(log.getTotalDraftAccepted());
+					entry.setMaxPredictedPerSecond(log.getMaxPredictedPerSecond());
+					entry.setMaxPromptPerSecond(log.getMaxPromptPerSecond());
 					this.tokenSummaryCache.put(modelId, entry);
 				} catch (Exception ignore) {
 				}
@@ -86,6 +89,10 @@ public class LlamaRecordService {
 		return new ArrayList<>(this.tokenSummaryCache.values());
 	}
 
+	public TokenSummaryEntry getTokenSummaryEntry(String modelId) {
+		return this.tokenSummaryCache.get(modelId);
+	}
+
 	private void updateTokenSummary(String modelId, RequestLogRecord record) {
 		TokenSummaryEntry entry = this.tokenSummaryCache.computeIfAbsent(modelId, id -> {
 			TokenSummaryEntry e = new TokenSummaryEntry();
@@ -100,6 +107,12 @@ public class LlamaRecordService {
 		entry.setTotalPredictedMs(entry.getTotalPredictedMs() + record.predictedMs);
 		entry.setTotalDraftTokens(entry.getTotalDraftTokens() + record.draftN);
 		entry.setTotalDraftAccepted(entry.getTotalDraftAccepted() + record.draftNAccepted);
+		if (record.draftN == 0 && record.predictedPerSecond > entry.getMaxPredictedPerSecond()) {
+			entry.setMaxPredictedPerSecond(record.predictedPerSecond);
+		}
+		if (record.draftN == 0 && record.promptPerSecond > entry.getMaxPromptPerSecond()) {
+			entry.setMaxPromptPerSecond(record.promptPerSecond);
+		}
 	}
 
     private BinaryRequestLog getLog(String modelId) throws IOException {
@@ -201,11 +214,37 @@ public class LlamaRecordService {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-		}
-	}
+       }
+    }
 
-	/**
-	 * 处理流式响应中的 timings 数据，将其累加到对应模型的记录中并持久化。
+    /**
+     * 启动时自动将 V1 header 升级到 V2，扫描所有记录计算 max 解码/预填充速度。
+     */
+    private void migrateHeaderV1toV2() throws IOException {
+        Path dir = Paths.get(RECORD_DIR);
+        if (!Files.exists(dir)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.list(dir)) {
+            List<Path> binFiles = paths
+                .filter(p -> p.toString().endsWith(".requests.bin"))
+                .collect(java.util.stream.Collectors.toList());
+            for (Path binPath : binFiles) {
+                String modelId = binPath.getFileName().toString().replace(".requests.bin", "");
+                try {
+                    boolean migrated = BinaryRequestLog.migrateV1toV2(binPath);
+                    if (migrated) {
+                        System.out.println("[LlamaRecordService] Header V1->V2 migrated: " + modelId);
+                    }
+                } catch (Exception e) {
+                    System.err.println("[LlamaRecordService] Header migration failed for " + modelId + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * 处理流式响应中的 timings 数据，将其累加到对应模型的记录中并持久化。
 	 * 
 	 * @param modelId 模型唯一标识
 	 * @param json    包含 timings 数据的 JSON 字符串

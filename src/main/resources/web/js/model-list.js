@@ -80,7 +80,7 @@ function loadModels() {
                             const key = modelCompositeKey(m.id, m.nodeId);
                             loadedByKey[key] = m;
                         });
-                        const modelsWithStatus = allModels.map(model => {
+ const modelsWithStatus = allModels.map(model => {
                             const key = modelCompositeKey(model.id, model.nodeId);
                             const loadedModel = loadedByKey[key];
                             return {
@@ -92,14 +92,40 @@ function loadModels() {
                                 busy: loadedModel ? !!loadedModel.busy : false
                             };
                         });
-                        currentModelsData = modelsWithStatus;
-                        sortAndRenderModels();
-                        populateNodeFilter();
-                        if (loadedData.success) {
-                            const loadedCount = (loadedData.models || []).length;
-                            const el = document.getElementById('loadedModelsCount');
-                            if (el) el.textContent = loadedCount;
-                        }
+                        fetch('/api/models/record/speed')
+                            .then(r => r.json())
+                            .then(speedData => {
+                                const speedMap = {};
+                                if (speedData.success && Array.isArray(speedData.data)) {
+                                    speedData.data.forEach(s => { speedMap[s.modelId] = s; });
+                                }
+                                currentModelsData = modelsWithStatus.map(m => {
+                                    var speedKey = m.alias && m.alias.trim() ? m.alias : m.id;
+                                    var speedEntry = speedMap[speedKey];
+                                    return {
+                                        ...m,
+                                        maxPredictedPerSecond: speedEntry ? speedEntry.maxPredictedPerSecond : 0,
+                                        maxPromptPerSecond: speedEntry ? speedEntry.maxPromptPerSecond : 0
+                                    };
+                                });
+                                sortAndRenderModels();
+                                populateNodeFilter();
+                                if (loadedData.success) {
+                                    const loadedCount = (loadedData.models || []).length;
+                                    const el = document.getElementById('loadedModelsCount');
+                                    if (el) el.textContent = loadedCount;
+                                }
+                            })
+                            .catch(() => {
+                                currentModelsData = modelsWithStatus;
+                                sortAndRenderModels();
+                                populateNodeFilter();
+                                if (loadedData.success) {
+                                    const loadedCount = (loadedData.models || []).length;
+                                    const el = document.getElementById('loadedModelsCount');
+                                    if (el) el.textContent = loadedCount;
+                                }
+                            });
                     });
             } else {
                 throw new Error(data.error);
@@ -446,28 +472,32 @@ function renderModelsList(models) {
         const badges = `${model.supportsVision ? '<span class="vision-badge"><i class="fas fa-image"></i></span>' : ''}${model.supportsAudio ? '<span class="audio-badge"><i class="fas fa-headphones"></i></span>' : ''}${model.hasMtp ? '<span class="mtp-badge">MTP</span>' : ''}`;
         const hasBadges = badges.length > 0;
         const nameClickAttr = `onclick="openAliasModal(decodeURIComponent('${encodeURIComponent(model.id)}'), decodeURIComponent('${encodeURIComponent(model.name)}'), decodeURIComponent('${encodeURIComponent(model.alias || '')}'), '${nodeId || 'local'}')"`;
+const speedHtml = (model.maxPromptPerSecond ? `<span class="model-meta-prompt-speed" title="最快预填充速度">In ${model.maxPromptPerSecond.toFixed(0)} t/s</span>` : '') + (model.maxPredictedPerSecond ? `<span class="model-meta-predicted-speed" title="最快解码速度">Out ${model.maxPredictedPerSecond.toFixed(1)} t/s</span>` : '');
+        const hasSpeed = speedHtml.length > 0;
         const metaBlock = `<div class="model-meta">
-                                <span><i class="fas fa-layer-group"></i> ${architecture}</span>
-                                ${quantization ? `<span><i class="fas fa-microchip"></i> ${quantization}</span>` : ''}
-                                <span><i class="fas fa-hdd"></i> ${formatFileSize(model.size)}</span>
-                                ${model.port ? `<span><i class="fas fa-network-wired"></i> ${model.port}</span>` : ''}
-                            </div>`;
+                                  <span><i class="fas fa-layer-group"></i> ${architecture}</span>
+                                  ${quantization ? `<span><i class="fas fa-microchip"></i> ${quantization}</span>` : ''}
+                                  <span><i class="fas fa-hdd"></i> ${formatFileSize(model.size)}</span>
+                                  ${model.port ? `<span><i class="fas fa-network-wired"></i> ${model.port}</span>` : ''}
+                              </div>`;
         const slotsAndNode = `<span class="model-slots" id="slots-${encodeURIComponent(modelCompositeKey(model.id, model.nodeId))}" style="display:none;">${renderSlotsSquaresInner(model.slots)}</span>${nodeBadge ? '<div class="model-node-badge-line">' + nodeBadge + '</div>' : ''}`;
         const detailsBlock = isGridView
             ? `<div class="model-details">
-                             <div class="model-name" title="${model.name}" ${nameClickAttr}>${displayName}</div>
-                            ${hasBadges ? `<div class="model-badges">${badges}</div>` : ''}
-                            ${metaBlock}
-							${slotsAndNode}
-                        </div>`
+                              <div class="model-name" title="${model.name}" ${nameClickAttr}>${displayName}</div>
+                             ${hasBadges ? `<div class="model-badges">${badges}</div>` : ''}
+                             ${metaBlock}
+                             ${hasSpeed ? `<div class="model-speed-row">${speedHtml}</div>` : ''}
+ 							${slotsAndNode}
+                         </div>`
             : `<div class="model-details">
-                             <div class="model-name" title="${model.name}" ${nameClickAttr}>
-                                ${displayName}
-                                 ${badges}
-                            </div>
-                            ${metaBlock}
-							${slotsAndNode}
-                        </div>`;
+                              <div class="model-name" title="${model.name}" ${nameClickAttr}>
+                                 ${displayName}
+                                  ${badges}
+                             </div>
+                             ${metaBlock}
+                             ${hasSpeed ? `<div class="model-speed-row">${speedHtml}</div>` : ''}
+ 							${slotsAndNode}
+                         </div>`;
         const statusBadge = `<div class="model-status-badge ${statusClass}">
                             <i class="fas ${statusIcon}"></i> <span>${statusText}</span>
                             ${model.busy && model.isLoaded ? '<span class="model-busy-indicator"><i class="fas fa-sync-alt fa-spin"></i> ' + t('page.model.status.busy', '工作中') + '</span>' : ''}

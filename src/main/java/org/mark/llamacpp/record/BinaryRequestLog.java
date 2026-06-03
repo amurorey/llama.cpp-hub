@@ -18,8 +18,9 @@ import java.nio.file.StandardOpenOption;
 public class BinaryRequestLog implements Closeable {
 
     public static final int MAGIC = 0x524C4F47;
-    public static final int VERSION = 1;
-    public static final int HEADER_SIZE = 80;
+    public static final int VERSION = 2;
+    public static final int HEADER_SIZE = 216;
+    public static final int HEADER_SIZE_V1 = 80;
     public static final int RECORD_SIZE = 55;
 
     private FileChannel channel;
@@ -33,6 +34,8 @@ public class BinaryRequestLog implements Closeable {
     private long lastRecordTime;
     private double totalPromptMs;
     private double totalPredictedMs;
+    private float maxPredictedPerSecond;
+    private float maxPromptPerSecond;
 
     public BinaryRequestLog(Path filePath) throws IOException {
         this.channel = FileChannel.open(filePath,
@@ -60,6 +63,9 @@ public class BinaryRequestLog implements Closeable {
         buf.putLong(0);
         buf.putDouble(0);
         buf.putDouble(0);
+        buf.putFloat(0);
+        buf.putFloat(0);
+        buf.put(new byte[128]);
         synchronized (this.channel) {
             this.channel.position(0);
             buf.flip();
@@ -80,7 +86,7 @@ public class BinaryRequestLog implements Closeable {
         if (magic != MAGIC) {
             throw new IOException("Invalid magic number: 0x" + Integer.toHexString(magic));
         }
-        if (version != VERSION) {
+        if (version < 1 || version > VERSION) {
             throw new IOException("Unsupported version: " + version);
         }
         this.recordCount = buf.getLong();
@@ -92,6 +98,13 @@ public class BinaryRequestLog implements Closeable {
         this.lastRecordTime = buf.getLong();
         this.totalPromptMs = buf.getDouble();
         this.totalPredictedMs = buf.getDouble();
+        if (version >= 2) {
+            this.maxPredictedPerSecond = buf.getFloat();
+            this.maxPromptPerSecond = buf.getFloat();
+        } else {
+            this.maxPredictedPerSecond = 0;
+            this.maxPromptPerSecond = 0;
+        }
     }
 
     private void writeHeader() throws IOException {
@@ -108,6 +121,9 @@ public class BinaryRequestLog implements Closeable {
         buf.putLong(this.lastRecordTime);
         buf.putDouble(this.totalPromptMs);
         buf.putDouble(this.totalPredictedMs);
+        buf.putFloat(this.maxPredictedPerSecond);
+        buf.putFloat(this.maxPromptPerSecond);
+        buf.put(new byte[128]);
         synchronized (this.channel) {
             this.channel.position(0);
             buf.flip();
@@ -244,6 +260,12 @@ public class BinaryRequestLog implements Closeable {
         this.lastRecordTime = startTime;
         this.totalPromptMs += promptMs;
         this.totalPredictedMs += predictedMs;
+        if (draftN == 0 && predictedPerSecond > this.maxPredictedPerSecond) {
+            this.maxPredictedPerSecond = predictedPerSecond;
+        }
+        if (draftN == 0 && promptPerSecond > this.maxPromptPerSecond) {
+            this.maxPromptPerSecond = promptPerSecond;
+        }
         writeHeader();
     }
 
@@ -362,6 +384,125 @@ public class BinaryRequestLog implements Closeable {
 
     public double getTotalPredictedMs() {
         return this.totalPredictedMs;
+    }
+
+    public float getMaxPredictedPerSecond() {
+        return this.maxPredictedPerSecond;
+    }
+
+    public float getMaxPromptPerSecond() {
+        return this.maxPromptPerSecond;
+    }
+
+    /**
+     * Migrate V1 header to V2 by scanning all records for max speed values,
+     * then rewrite header + all records to account for the larger header size.
+     * @return true if migration was performed, false if already V2
+     */
+    public static boolean migrateV1toV2(Path filePath) throws IOException {
+        FileChannel ch = FileChannel.open(filePath, StandardOpenOption.READ, StandardOpenOption.WRITE);
+        try {
+            ByteBuffer verBuf = ByteBuffer.allocate(8);
+            verBuf.order(ByteOrder.LITTLE_ENDIAN);
+            ch.position(0);
+            ch.read(verBuf);
+            verBuf.flip();
+            int magic = verBuf.getInt();
+            int version = verBuf.getInt();
+            if (magic != MAGIC) {
+                throw new IOException("Invalid magic: 0x" + Integer.toHexString(magic));
+            }
+            if (version == VERSION) {
+                return false;
+            }
+            if (version != 1) {
+                throw new IOException("Cannot migrate from version: " + version);
+            }
+            ByteBuffer v1Buf = ByteBuffer.allocate(HEADER_SIZE_V1);
+            v1Buf.order(ByteOrder.LITTLE_ENDIAN);
+            ch.position(0);
+            ch.read(v1Buf);
+            v1Buf.flip();
+            v1Buf.getInt();
+            v1Buf.getInt();
+            long vRecordCount = v1Buf.getLong();
+            long vTotalPromptTokens = v1Buf.getLong();
+            long vTotalPredictedTokens = v1Buf.getLong();
+            long vTotalCacheTokens = v1Buf.getLong();
+            long vTotalDraftTokens = v1Buf.getLong();
+            long vTotalDraftAccepted = v1Buf.getLong();
+            long vLastRecordTime = v1Buf.getLong();
+            double vTotalPromptMs = v1Buf.getDouble();
+            double vTotalPredictedMs = v1Buf.getDouble();
+            long fileSize = ch.size();
+            long recordCount = (fileSize - HEADER_SIZE_V1) / RECORD_SIZE;
+            float maxPredicted = 0;
+            float maxPrompt = 0;
+            byte[][] records = new byte[(int) recordCount][];
+            if (recordCount > 0) {
+                ByteBuffer recBuf = ByteBuffer.allocate(RECORD_SIZE);
+                recBuf.order(ByteOrder.LITTLE_ENDIAN);
+                for (long i = 0; i < recordCount; i++) {
+                    long offset = HEADER_SIZE_V1 + (i * RECORD_SIZE);
+                    ch.position(offset);
+                    ch.read(recBuf);
+                    records[(int) i] = recBuf.array().clone();
+                    recBuf.flip();
+                    recBuf.getLong();
+                    recBuf.get();
+                    recBuf.get();
+                    recBuf.get();
+                    recBuf.getInt();
+                    recBuf.getInt();
+                    recBuf.getFloat();
+                    recBuf.getFloat();
+                    float promptPerSecond = recBuf.getFloat();
+                    recBuf.getInt();
+                    recBuf.getFloat();
+                    recBuf.getFloat();
+                    float predictedPerSecond = recBuf.getFloat();
+                    int draftN = recBuf.getInt();
+                    recBuf.getInt();
+                    if (draftN == 0 && predictedPerSecond > maxPredicted) {
+                        maxPredicted = predictedPerSecond;
+                    }
+                    if (draftN == 0 && promptPerSecond > maxPrompt) {
+                        maxPrompt = promptPerSecond;
+                    }
+                    recBuf.clear();
+                }
+            }
+            ByteBuffer newHdr = ByteBuffer.allocate(HEADER_SIZE);
+            newHdr.order(ByteOrder.LITTLE_ENDIAN);
+            newHdr.putInt(MAGIC);
+            newHdr.putInt(VERSION);
+            newHdr.putLong(vRecordCount);
+            newHdr.putLong(vTotalPromptTokens);
+            newHdr.putLong(vTotalPredictedTokens);
+            newHdr.putLong(vTotalCacheTokens);
+            newHdr.putLong(vTotalDraftTokens);
+            newHdr.putLong(vTotalDraftAccepted);
+            newHdr.putLong(vLastRecordTime);
+            newHdr.putDouble(vTotalPromptMs);
+            newHdr.putDouble(vTotalPredictedMs);
+            newHdr.putFloat(maxPredicted);
+            newHdr.putFloat(maxPrompt);
+            newHdr.put(new byte[128]);
+            ch.position(0);
+            newHdr.flip();
+            ch.write(newHdr);
+            for (int i = 0; i < records.length; i++) {
+                long offset = HEADER_SIZE + (i * RECORD_SIZE);
+                ByteBuffer recBuf = ByteBuffer.wrap(records[i]);
+                ch.position(offset);
+                ch.write(recBuf);
+            }
+            long newFileSize = HEADER_SIZE + (recordCount * RECORD_SIZE);
+            ch.truncate(newFileSize);
+            return true;
+        } finally {
+            ch.close();
+        }
     }
 
     @Override

@@ -2,8 +2,10 @@ package org.mark.llamacpp.server.controller;
 
 import java.io.File;
 import java.lang.reflect.Type;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.mark.llamacpp.gguf.GGUFMetaData;
@@ -19,6 +21,7 @@ import org.mark.llamacpp.server.service.ChatTemplateKwargsService;
 import org.mark.llamacpp.server.service.LlamaRecordService;
 import org.mark.llamacpp.server.service.ModelSamplingService;
 import org.mark.llamacpp.server.struct.ApiResponse;
+import org.mark.llamacpp.server.struct.TokenSummaryEntry;
 import org.mark.llamacpp.server.tools.ChatTemplateFileTool;
 import org.mark.llamacpp.server.tools.JsonUtil;
 import org.mark.llamacpp.server.tools.ParamTool;
@@ -139,6 +142,11 @@ public class ModelInfoController implements BaseController {
 		
 		
 		//============================用量信息============================
+		// 查询对应模型的最快解码/预填充速度（必须放在 /record 之前，避免被误匹配）
+		if (uri.startsWith("/api/models/record/speed")) {
+			this.handleModelRecordSpeedRequest(ctx, request);
+			return true;
+		}
 		// 查询对应模型的用量记录
 		if (uri.startsWith("/api/models/record")) {
 			this.handleModelRecordRequest(ctx, request);
@@ -186,15 +194,50 @@ public class ModelInfoController implements BaseController {
 			logger.info("获取模型用量记录时发生错误", e);
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("获取模型用量记录失败: " + e.getMessage()));
 		}
-	}
+   }
 
-	/**
-	 * 	模型的能力设定
-	 * @param ctx
-	 * @param request
-	 * @throws RequestMethodException
-	 */
-	private void handleModelCapabilitiesSetRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+    /**
+     * 获取模型最快解码/预填充速度
+     * @param ctx
+     * @param request
+     * @throws RequestMethodException
+     */
+    private void handleModelRecordSpeedRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+        this.assertRequestMethod(request.method() != HttpMethod.GET, "只支持GET请求");
+        try {
+            Map<String, String> params = ParamTool.getQueryParam(request.uri());
+            String modelId = params.get("modelId");
+            if (modelId == null || modelId.trim().isEmpty()) {
+                List<Map<String, Object>> list = new ArrayList<>();
+                for (TokenSummaryEntry entry : LlamaRecordService.getInstance().getTokenSummary()) {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("modelId", entry.getModelId());
+                    item.put("maxPredictedPerSecond", entry.getMaxPredictedPerSecond());
+                    item.put("maxPromptPerSecond", entry.getMaxPromptPerSecond());
+                    list.add(item);
+                }
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.success(list));
+                return;
+            }
+            TokenSummaryEntry entry = LlamaRecordService.getInstance().getTokenSummaryEntry(modelId);
+            Map<String, Object> data = new HashMap<>();
+            data.put("modelId", modelId);
+            data.put("maxPredictedPerSecond", entry != null ? entry.getMaxPredictedPerSecond() : 0f);
+            data.put("maxPromptPerSecond", entry != null ? entry.getMaxPromptPerSecond() : 0f);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
+        } catch (Exception e) {
+            logger.info("获取模型最快速度时发生错误", e);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.error("获取模型最快速度失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 	模型的能力设定
+     * @param ctx
+     * @param request
+     * @throws RequestMethodException
+     */
+    private void handleModelCapabilitiesSetRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
 		this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
 		try {
 			String content = request.content().toString(CharsetUtil.UTF_8);

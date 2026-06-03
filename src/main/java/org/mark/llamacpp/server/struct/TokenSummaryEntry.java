@@ -10,6 +10,8 @@ public class TokenSummaryEntry {
 	private double totalPredictedMs;
 	private long totalDraftTokens;
 	private long totalDraftAccepted;
+	private float maxPredictedPerSecond;
+	private float maxPromptPerSecond;
 
 	public String getModelId() {
 		return modelId;
@@ -79,7 +81,23 @@ public class TokenSummaryEntry {
 		return totalDraftAccepted;
 	}
 
-	public void setTotalDraftAccepted(long totalDraftAccepted) {
-		this.totalDraftAccepted = totalDraftAccepted;
-	}
+ public void setTotalDraftAccepted(long totalDraftAccepted) {
+        this.totalDraftAccepted = totalDraftAccepted;
+    }
+
+    public float getMaxPredictedPerSecond() {
+        return maxPredictedPerSecond;
+    }
+
+    public void setMaxPredictedPerSecond(float maxPredictedPerSecond) {
+        this.maxPredictedPerSecond = maxPredictedPerSecond;
+    }
+
+    public float getMaxPromptPerSecond() {
+        return maxPromptPerSecond;
+    }
+
+    public void setMaxPromptPerSecond(float maxPromptPerSecond) {
+        this.maxPromptPerSecond = maxPromptPerSecond;
+    }
 }
