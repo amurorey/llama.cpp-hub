@@ -802,10 +802,21 @@
             var result = await resp.json();
             if (result && result.success && result.data) {
                 var d = result.data;
+                var newStatus = d.connected ? 'online' : 'offline';
+                var newLabel = t('page.settings.nodes.status.' + newStatus, d.connected ? '在线' : '离线');
                 if (d.connected) {
                     toast(t('toast.success', '成功'), nodeId + ' 连通成功 (' + d.latency + 'ms) 版本: ' + (d.version || '未知'), 'success');
                 } else {
                     toast(t('toast.error', '错误'), nodeId + ' 连接失败 (' + (d.statusCode || '超时') + ')', 'error');
+                }
+                if (btn) {
+                    var card = btn.closest('.node-card');
+                    if (card) {
+                        var badge = card.querySelector('.node-status-badge');
+                        if (badge) { badge.className = 'node-status-badge ' + newStatus; badge.textContent = newLabel; }
+                        var dot = card.querySelector('.status-dot');
+                        if (dot) { dot.className = 'status-dot ' + newStatus; dot.title = newLabel; }
+                    }
                 }
             } else {
                 toast(t('toast.error', '错误'), '测试失败', 'error');
