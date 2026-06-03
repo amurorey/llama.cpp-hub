@@ -35,6 +35,8 @@ public class RequestLogRecord {
             case 4: return "/api/chat";
             case 5: return "/api/embed";
             case 6: return "/v1/generate";
+            case 7: return "/v1/rerank";
+            case 8: return "/v1/responses";
             default: return "UNKNOWN(" + this.endpoint + ")";
         }
     }

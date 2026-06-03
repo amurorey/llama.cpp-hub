@@ -142,6 +142,8 @@ public class LlamaRecordService {
         if (endpoint.contains("/api/chat")) return 4;
         if (endpoint.contains("/api/embed")) return 5;
         if (endpoint.contains("generate")) return 6;
+        if (endpoint.contains("rerank")) return 7;
+        if (endpoint.contains("responses")) return 8;
         return 0;
     }
 
