@@ -4688,7 +4688,7 @@
 
       try {
         while (true) {
-          const payload = buildPayload(historyMessages);
+          const { payload, nodeId } = buildPayload(historyMessages);
           requestModel = payload.model;
           const enabledTools = mcpModule ? mcpModule.getEnabledTools(getCurrentAssistant()) : [];
           showTypingIndicator(requestModel);
@@ -4697,7 +4697,7 @@
 
           const response = await fetch(CHAT_ENDPOINT, {
             method: 'POST',
-            headers: getHeaders(),
+            headers: getHeaders(nodeId),
             body: JSON.stringify(payload),
             signal: state.abortController.signal
           });
@@ -4942,10 +4942,13 @@
 
     let currentApiKey = '';
 
-    function getHeaders() {
+    function getHeaders(nodeId) {
       const headers = { 'Content-Type': 'application/json' };
       if (currentApiKey) {
         headers['Authorization'] = 'Bearer ' + currentApiKey;
+      }
+      if (nodeId) {
+        headers['X-Node-Id'] = nodeId;
       }
       return headers;
     }
@@ -5059,9 +5062,7 @@
         payload.return_progress = true;
         payload.timings_per_token = true;
       }
-      if (nd) {
-        payload.nodeId = nd;
-      }
+ 
       if (enabledTools.length && mcpModule) {
         payload.tools = enabledTools.map(tool => mcpModule.toModelTool(tool));
       }
@@ -5115,7 +5116,7 @@
       if (stop.length) {
         payload.stop = stop;
       }
-      return payload;
+      return { payload, nodeId: nd || '' };
     }
 
     function extractTextFromJson(json) {
@@ -5442,13 +5443,10 @@
         enable_thinking: false,
         stream: false
       };
-      if (nd) {
-        body.nodeId = nd;
-      }
       try {
         const response = await fetch(CHAT_ENDPOINT, {
           method: 'POST',
-          headers: getHeaders(),
+          headers: getHeaders(nd),
           body: JSON.stringify(body)
         });
         if (!response.ok) {
@@ -5530,15 +5528,12 @@
         enable_thinking: false,
         stream: false
       };
-      if (nd) {
-        body.nodeId = nd;
-      }
       els.autoReplyBtn.disabled = true;
       els.autoReplyBtn.setAttribute('aria-label', window.I18N.t('page.chat.main.auto_reply.generating', '正在生成…'));
       try {
         const response = await fetch(CHAT_ENDPOINT, {
           method: 'POST',
-          headers: getHeaders(),
+          headers: getHeaders(nd),
           body: JSON.stringify(body)
         });
         if (!response.ok) {

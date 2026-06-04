@@ -38,7 +38,6 @@ public class StreamingForwarder {
     private String modelName;
     private boolean modelFound;
     private volatile boolean stream;
-    private volatile boolean bodyReceived;
 
     /* nodeId 由外部从请求头设置，不从 body 提取 */
     private volatile String nodeId;
@@ -63,7 +62,6 @@ public class StreamingForwarder {
         if (closed.get()) {
             throw new IOException("stream closed");
         }
-        bodyReceived = true;
         long seq = chunkSeq.incrementAndGet();
         logger.info("[chunk#{}] {} 字节: {}", seq, chunk.length, previewChunk(chunk));
         try {
@@ -94,7 +92,6 @@ public class StreamingForwarder {
         if (chunk == null || chunk.length == 0) {
             return;
         }
-        bodyReceived = true;
         long seq = chunkSeq.incrementAndGet();
         logger.info("[chunk#{} LAST] {} 字节: {}", seq, chunk.length, previewChunk(chunk));
         this.lastChunk = chunk;
@@ -238,7 +235,8 @@ public class StreamingForwarder {
     }
 
     public static class ForwarderException extends IOException {
-        private final int httpStatus;
+        private static final long serialVersionUID = 1L;
+		private final int httpStatus;
         private final String param;
 
         public ForwarderException(int httpStatus, String message, String param) {
