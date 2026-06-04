@@ -32,7 +32,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +50,7 @@ import org.mark.llamacpp.server.LlamaCppProcess;
 
 /**
  * 	Anthropic API
- * 	实际上基本没有用过
+ * 	
  */
 public class AnthropicService {
 
@@ -676,81 +675,81 @@ public class AnthropicService {
         return null;
     }
 
-    @Deprecated
-    private void forwardMessagesToChatCompletions(ChannelHandlerContext ctx, FullHttpRequest request, String requestBody, String targetUrl, String apiKey, boolean isStream, String modelName) {
-        HttpMethod method = request.method();
-        Map<String, String> headers = new HashMap<>();
-        for (Map.Entry<String, String> entry : request.headers()) {
-            headers.put(entry.getKey(), entry.getValue());
-        }
-
-        worker.execute(() -> {
-            HttpURLConnection connection = null;
-            String requestId = null;
-            try {
-                requestId = ModelRequestTracker.getInstance().createRequest(modelName, "/v1/messages");
-                URL url = URI.create(targetUrl).toURL();
-                connection = (HttpURLConnection) url.openConnection();
-
-                if (connection instanceof HttpsURLConnection) {
-                    ((HttpsURLConnection) connection).setSSLSocketFactory(TRUST_ALL_SOCKET_FACTORY);
-                    ((HttpsURLConnection) connection).setHostnameVerifier(TRUST_ALL_HOSTNAME_VERIFIER);
-                }
-
-                synchronized (this.channelConnectionMap) {
-                    this.channelConnectionMap.put(ctx, connection);
-                }
-
-                connection.setRequestMethod(method.name());
-                connection.setRequestProperty(HttpHeaderNames.CONTENT_TYPE.toString(), "application/json");
-
-                for (Map.Entry<String, String> entry : headers.entrySet()) {
-                    if (!entry.getKey().equalsIgnoreCase("Connection") &&
-                        !entry.getKey().equalsIgnoreCase("Content-Length") &&
-                        !entry.getKey().equalsIgnoreCase("Transfer-Encoding") &&
-                        !entry.getKey().equalsIgnoreCase("X-Node-Id")) {
-                        connection.setRequestProperty(entry.getKey(), entry.getValue());
-                    }
-                }
-
-                if (apiKey != null && !apiKey.isBlank()) {
-                    connection.setRequestProperty("Authorization", "Bearer " + apiKey);
-                }
-
-                connection.setConnectTimeout(36000 * 1000);
-                connection.setReadTimeout(36000 * 1000);
-
-                if (method == HttpMethod.POST && requestBody != null && !requestBody.isEmpty()) {
-                    connection.setDoOutput(true);
-                    try (OutputStream os = connection.getOutputStream()) {
-                        byte[] input = requestBody.getBytes(StandardCharsets.UTF_8);
-                        os.write(input, 0, input.length);
-                    }
-                }
-
-                int responseCode = connection.getResponseCode();
-                ModelRequestTracker.getInstance().updatePhase(requestId, Phase.GENERATION);
-                if (isStream) {
-                    this.handleAnthropicStreamFromOai(ctx, connection, responseCode, modelName, requestId);
-                } else {
-                    this.handleAnthropicNonStreamFromOai(ctx, connection, responseCode, modelName, requestId);
-                }
-            } catch (Exception e) {
-                logger.info("Error forwarding Anthropic->OpenAI request to llama.cpp", e);
-                this.sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, e.getMessage());
-            } catch (Throwable t) {
-                logger.error("虚拟线程异常已兜底: {}", t.getMessage(), t);
-            } finally {
-                if (requestId != null) ModelRequestTracker.getInstance().removeRequest(requestId);
-                if (connection != null) {
-                    connection.disconnect();
-                }
-                synchronized (this.channelConnectionMap) {
-                    this.channelConnectionMap.remove(ctx);
-                }
-            }
-        });
-    }
+//    @Deprecated
+//    private void forwardMessagesToChatCompletions(ChannelHandlerContext ctx, FullHttpRequest request, String requestBody, String targetUrl, String apiKey, boolean isStream, String modelName) {
+//        HttpMethod method = request.method();
+//        Map<String, String> headers = new HashMap<>();
+//        for (Map.Entry<String, String> entry : request.headers()) {
+//            headers.put(entry.getKey(), entry.getValue());
+//        }
+//
+//        worker.execute(() -> {
+//            HttpURLConnection connection = null;
+//            String requestId = null;
+//            try {
+//                requestId = ModelRequestTracker.getInstance().createRequest(modelName, "/v1/messages");
+//                URL url = URI.create(targetUrl).toURL();
+//                connection = (HttpURLConnection) url.openConnection();
+//
+//                if (connection instanceof HttpsURLConnection) {
+//                    ((HttpsURLConnection) connection).setSSLSocketFactory(TRUST_ALL_SOCKET_FACTORY);
+//                    ((HttpsURLConnection) connection).setHostnameVerifier(TRUST_ALL_HOSTNAME_VERIFIER);
+//                }
+//
+//                synchronized (this.channelConnectionMap) {
+//                    this.channelConnectionMap.put(ctx, connection);
+//                }
+//
+//                connection.setRequestMethod(method.name());
+//                connection.setRequestProperty(HttpHeaderNames.CONTENT_TYPE.toString(), "application/json");
+//
+//                for (Map.Entry<String, String> entry : headers.entrySet()) {
+//                    if (!entry.getKey().equalsIgnoreCase("Connection") &&
+//                        !entry.getKey().equalsIgnoreCase("Content-Length") &&
+//                        !entry.getKey().equalsIgnoreCase("Transfer-Encoding") &&
+//                        !entry.getKey().equalsIgnoreCase("X-Node-Id")) {
+//                        connection.setRequestProperty(entry.getKey(), entry.getValue());
+//                    }
+//                }
+//
+//                if (apiKey != null && !apiKey.isBlank()) {
+//                    connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+//                }
+//
+//                connection.setConnectTimeout(36000 * 1000);
+//                connection.setReadTimeout(36000 * 1000);
+//
+//                if (method == HttpMethod.POST && requestBody != null && !requestBody.isEmpty()) {
+//                    connection.setDoOutput(true);
+//                    try (OutputStream os = connection.getOutputStream()) {
+//                        byte[] input = requestBody.getBytes(StandardCharsets.UTF_8);
+//                        os.write(input, 0, input.length);
+//                    }
+//                }
+//
+//                int responseCode = connection.getResponseCode();
+//                ModelRequestTracker.getInstance().updatePhase(requestId, Phase.GENERATION);
+//                if (isStream) {
+//                    this.handleAnthropicStreamFromOai(ctx, connection, responseCode, modelName, requestId);
+//                } else {
+//                    this.handleAnthropicNonStreamFromOai(ctx, connection, responseCode, modelName, requestId);
+//                }
+//            } catch (Exception e) {
+//                logger.info("Error forwarding Anthropic->OpenAI request to llama.cpp", e);
+//                this.sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, e.getMessage());
+//            } catch (Throwable t) {
+//                logger.error("虚拟线程异常已兜底: {}", t.getMessage(), t);
+//            } finally {
+//                if (requestId != null) ModelRequestTracker.getInstance().removeRequest(requestId);
+//                if (connection != null) {
+//                    connection.disconnect();
+//                }
+//                synchronized (this.channelConnectionMap) {
+//                    this.channelConnectionMap.remove(ctx);
+//                }
+//            }
+//        });
+//    }
 
     private void handleNonStreamResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String requestId, String modelName) throws IOException {
         String responseBody;
@@ -807,64 +806,64 @@ public class AnthropicService {
         });
     }
 
-    @Deprecated
-    private void handleAnthropicNonStreamFromOai(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String modelName, String requestId) throws IOException {
-        String responseBody;
-        if (responseCode >= 200 && responseCode < 300) {
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
-                StringBuilder response = new StringBuilder();
-                String responseLine;
-                while ((responseLine = br.readLine()) != null) {
-                    response.append(responseLine.trim());
-                }
-                responseBody = response.toString();
-            }
-        } else {
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
-                StringBuilder response = new StringBuilder();
-                String responseLine;
-                while ((responseLine = br.readLine()) != null) {
-                    response.append(responseLine.trim());
-                }
-                responseBody = response.toString();
-            }
-        }
-
-        if (responseCode >= 200 && responseCode < 300) {
-            JsonElement root = JsonParser.parseString(responseBody);
-            JsonObject oaiRes = root != null && root.isJsonObject() ? root.getAsJsonObject() : null;
-            if (oaiRes == null) {
-                this.sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "Invalid OpenAI response");
-                return;
-            }
-            if (oaiRes.has("timings")) {
-                Timing timing = gson.fromJson(oaiRes.get("timings"), Timing.class);
-                ModelRequestTracker.getInstance().updateTiming(requestId, timing);
-            } else if (oaiRes.has("usage")) {
-                LlamaRecordService.getInstance().recordUsage(requestId, modelName, oaiRes.getAsJsonObject("usage"));
-            }
-            JsonObject anthropicRes = convertOaiResponseToAnthropic(oaiRes);
-            responseBody = JsonUtil.toJson(anthropicRes);
-        }
-
-        FullHttpResponse response = new DefaultFullHttpResponse(
-            HttpVersion.HTTP_1_1,
-            HttpResponseStatus.valueOf(responseCode)
-        );
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
-        byte[] responseBytes = responseBody.getBytes(StandardCharsets.UTF_8);
-        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, responseBytes.length);
-        response.content().writeBytes(responseBytes);
-
-        ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) {
-                ctx.close();
-            }
-        });
-    }
+//    @Deprecated
+//    private void handleAnthropicNonStreamFromOai(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String modelName, String requestId) throws IOException {
+//        String responseBody;
+//        if (responseCode >= 200 && responseCode < 300) {
+//            try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+//                StringBuilder response = new StringBuilder();
+//                String responseLine;
+//                while ((responseLine = br.readLine()) != null) {
+//                    response.append(responseLine.trim());
+//                }
+//                responseBody = response.toString();
+//            }
+//        } else {
+//            try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
+//                StringBuilder response = new StringBuilder();
+//                String responseLine;
+//                while ((responseLine = br.readLine()) != null) {
+//                    response.append(responseLine.trim());
+//                }
+//                responseBody = response.toString();
+//            }
+//        }
+//
+//        if (responseCode >= 200 && responseCode < 300) {
+//            JsonElement root = JsonParser.parseString(responseBody);
+//            JsonObject oaiRes = root != null && root.isJsonObject() ? root.getAsJsonObject() : null;
+//            if (oaiRes == null) {
+//                this.sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "Invalid OpenAI response");
+//                return;
+//            }
+//            if (oaiRes.has("timings")) {
+//                Timing timing = gson.fromJson(oaiRes.get("timings"), Timing.class);
+//                ModelRequestTracker.getInstance().updateTiming(requestId, timing);
+//            } else if (oaiRes.has("usage")) {
+//                LlamaRecordService.getInstance().recordUsage(requestId, modelName, oaiRes.getAsJsonObject("usage"));
+//            }
+//            JsonObject anthropicRes = convertOaiResponseToAnthropic(oaiRes);
+//            responseBody = JsonUtil.toJson(anthropicRes);
+//        }
+//
+//        FullHttpResponse response = new DefaultFullHttpResponse(
+//            HttpVersion.HTTP_1_1,
+//            HttpResponseStatus.valueOf(responseCode)
+//        );
+//        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
+//        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+//        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+//        byte[] responseBytes = responseBody.getBytes(StandardCharsets.UTF_8);
+//        response.headers().set(HttpHeaderNames.CONTENT_LENGTH, responseBytes.length);
+//        response.content().writeBytes(responseBytes);
+//
+//        ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
+//            @Override
+//            public void operationComplete(ChannelFuture future) {
+//                ctx.close();
+//            }
+//        });
+//    }
 
     private void handleStreamResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String requestId, String modelName) throws IOException {
         HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(responseCode));
@@ -974,94 +973,94 @@ public class AnthropicService {
         });
     }
 
-    @Deprecated
-    private void handleAnthropicStreamFromOai(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String modelName, String requestId) throws IOException {
-        HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(responseCode));
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream; charset=UTF-8");
-        response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
-        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
-
-        ctx.write(response);
-        ctx.flush();
-
-        AnthropicStreamState streamState = new AnthropicStreamState();
-
-        try (BufferedReader br = new BufferedReader(
-            new InputStreamReader(
-                responseCode >= 200 && responseCode < 300 ?
-                    connection.getInputStream() : connection.getErrorStream(),
-                StandardCharsets.UTF_8
-            )
-        )) {
-            String line;
-            while ((line = br.readLine()) != null) {
-                if (!ctx.channel().isActive()) {
-                    if (connection != null) {
-                        connection.disconnect();
-                    }
-                    break;
-                }
-                if (!line.startsWith("data: ")) {
-                    continue;
-                }
-                String data = line.substring(6).trim();
-                if (data.isEmpty()) {
-                    continue;
-                }
-                if ("[DONE]".equals(data)) {
-                    if (!streamState.finished) {
-                        String tail = buildAnthropicStopEvents(streamState);
-                        if (!tail.isEmpty()) {
-                            writeSseChunk(ctx, tail);
-                        }
-                    }
-                    break;
-                }
-				else 
-				// 统计生成信息 — timings 只在最后一个 chunk 出现，天然作为结束标记
-				if(data.contains("\"timings\"") || data.contains("\"usage\"")) {
-					try {
-						JsonElement root = JsonParser.parseString(data);
-						if (root.isJsonObject()) {
-							JsonObject obj = root.getAsJsonObject();
-							if (obj.has("timings")) {
-								Timing timing = gson.fromJson(obj.get("timings"), Timing.class);
-								ModelRequestTracker.getInstance().updateTiming(requestId, timing);
-							} else if (obj.has("usage")) {
-								LlamaRecordService.getInstance().recordUsage(requestId, modelName, obj.getAsJsonObject("usage"));
-							}
-						}
-					} catch (Exception ignore) {}
-				}
-
-                JsonObject chunk;
-                try {
-                    JsonElement root = JsonParser.parseString(data);
-                    if (!root.isJsonObject()) {
-                        continue;
-                    }
-                    chunk = root.getAsJsonObject();
-                } catch (Exception ignore) {
-                    continue;
-                }
-
-                String out = convertOaiStreamChunkToAnthropicSse(chunk, streamState);
-                if (!out.isEmpty()) {
-                    writeSseChunk(ctx, out);
-                }
-            }
-        }
-
-        LastHttpContent lastContent = LastHttpContent.EMPTY_LAST_CONTENT;
-        ctx.writeAndFlush(lastContent).addListener(new ChannelFutureListener() {
-            @Override
-            public void operationComplete(ChannelFuture future) {
-                ctx.close();
-            }
-        });
-    }
+//    @Deprecated
+//    private void handleAnthropicStreamFromOai(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String modelName, String requestId) throws IOException {
+//        HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(responseCode));
+//        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream; charset=UTF-8");
+//        response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
+//        response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+//        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+//        response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+//
+//        ctx.write(response);
+//        ctx.flush();
+//
+//        AnthropicStreamState streamState = new AnthropicStreamState();
+//
+//        try (BufferedReader br = new BufferedReader(
+//            new InputStreamReader(
+//                responseCode >= 200 && responseCode < 300 ?
+//                    connection.getInputStream() : connection.getErrorStream(),
+//                StandardCharsets.UTF_8
+//            )
+//        )) {
+//            String line;
+//            while ((line = br.readLine()) != null) {
+//                if (!ctx.channel().isActive()) {
+//                    if (connection != null) {
+//                        connection.disconnect();
+//                    }
+//                    break;
+//                }
+//                if (!line.startsWith("data: ")) {
+//                    continue;
+//                }
+//                String data = line.substring(6).trim();
+//                if (data.isEmpty()) {
+//                    continue;
+//                }
+//                if ("[DONE]".equals(data)) {
+//                    if (!streamState.finished) {
+//                        String tail = buildAnthropicStopEvents(streamState);
+//                        if (!tail.isEmpty()) {
+//                            writeSseChunk(ctx, tail);
+//                        }
+//                    }
+//                    break;
+//                }
+//				else 
+//				// 统计生成信息 — timings 只在最后一个 chunk 出现，天然作为结束标记
+//				if(data.contains("\"timings\"") || data.contains("\"usage\"")) {
+//					try {
+//						JsonElement root = JsonParser.parseString(data);
+//						if (root.isJsonObject()) {
+//							JsonObject obj = root.getAsJsonObject();
+//							if (obj.has("timings")) {
+//								Timing timing = gson.fromJson(obj.get("timings"), Timing.class);
+//								ModelRequestTracker.getInstance().updateTiming(requestId, timing);
+//							} else if (obj.has("usage")) {
+//								LlamaRecordService.getInstance().recordUsage(requestId, modelName, obj.getAsJsonObject("usage"));
+//							}
+//						}
+//					} catch (Exception ignore) {}
+//				}
+//
+//                JsonObject chunk;
+//                try {
+//                    JsonElement root = JsonParser.parseString(data);
+//                    if (!root.isJsonObject()) {
+//                        continue;
+//                    }
+//                    chunk = root.getAsJsonObject();
+//                } catch (Exception ignore) {
+//                    continue;
+//                }
+//
+//                String out = convertOaiStreamChunkToAnthropicSse(chunk, streamState);
+//                if (!out.isEmpty()) {
+//                    writeSseChunk(ctx, out);
+//                }
+//            }
+//        }
+//
+//        LastHttpContent lastContent = LastHttpContent.EMPTY_LAST_CONTENT;
+//        ctx.writeAndFlush(lastContent).addListener(new ChannelFutureListener() {
+//            @Override
+//            public void operationComplete(ChannelFuture future) {
+//                ctx.close();
+//            }
+//        });
+//    }
 
     private void sendJsonResponse(ChannelHandlerContext ctx, JsonObject json, HttpResponseStatus status) {
         String jsonStr = gson.toJson(json);
@@ -1388,429 +1387,429 @@ public class AnthropicService {
         return el.getAsJsonObject();
     }
 
-    @Deprecated
-    private JsonObject convertOaiResponseToAnthropic(JsonObject oaiRes) {
-        JsonObject result = new JsonObject();
-        result.addProperty("id", getString(oaiRes, "id"));
-        result.addProperty("type", "message");
-        result.addProperty("role", "assistant");
-        result.addProperty("model", getString(oaiRes, "model"));
+//    @Deprecated
+//    private JsonObject convertOaiResponseToAnthropic(JsonObject oaiRes) {
+//        JsonObject result = new JsonObject();
+//        result.addProperty("id", getString(oaiRes, "id"));
+//        result.addProperty("type", "message");
+//        result.addProperty("role", "assistant");
+//        result.addProperty("model", getString(oaiRes, "model"));
+//
+//        JsonObject message = getChoiceMessage(oaiRes);
+//        JsonArray content = new JsonArray();
+//        String reasoningContent = getString(message, "reasoning_content");
+//        if (!reasoningContent.isEmpty()) {
+//            JsonObject thinkingBlock = new JsonObject();
+//            thinkingBlock.addProperty("type", "thinking");
+//            thinkingBlock.addProperty("thinking", reasoningContent);
+//            thinkingBlock.addProperty("signature", "");
+//            content.add(thinkingBlock);
+//        }
+//
+//        String text = extractAssistantText(message.get("content"));
+//        if (!text.isEmpty()) {
+//            JsonObject textBlock = new JsonObject();
+//            textBlock.addProperty("type", "text");
+//            textBlock.addProperty("text", text);
+//            content.add(textBlock);
+//        }
+//
+//        if (message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
+//            JsonArray toolCalls = message.getAsJsonArray("tool_calls");
+//            for (int i = 0; i < toolCalls.size(); i++) {
+//                JsonElement tcEl = toolCalls.get(i);
+//                if (tcEl == null || !tcEl.isJsonObject()) {
+//                    continue;
+//                }
+//                JsonObject tc = tcEl.getAsJsonObject();
+//                JsonObject function = getObject(tc, "function");
+//                JsonObject toolUse = new JsonObject();
+//                toolUse.addProperty("type", "tool_use");
+//                toolUse.addProperty("id", getString(tc, "id"));
+//                toolUse.addProperty("name", getString(function, "name"));
+//                String arguments = getString(function, "arguments");
+//                JsonElement input = tryParseJson(arguments);
+//                if (input != null && input.isJsonObject()) {
+//                    toolUse.add("input", input);
+//                } else {
+//                    toolUse.add("input", new JsonObject());
+//                }
+//                content.add(toolUse);
+//            }
+//        }
+//        result.add("content", content);
+//
+//        JsonObject choice = getChoice(oaiRes);
+//        String finishReason = getString(choice, "finish_reason");
+//        result.addProperty("stop_reason", mapStopReason(finishReason, message));
+//        JsonElement stop = choice.get("stop_sequence");
+//        if (stop != null && !stop.isJsonNull()) {
+//            result.add("stop_sequence", stop.deepCopy());
+//        } else {
+//            result.add("stop_sequence", null);
+//        }
+//
+//        JsonObject usage = getObject(oaiRes, "usage");
+//        int promptTokens = getInt(usage, "prompt_tokens", 0);
+//        int completionTokens = getInt(usage, "completion_tokens", 0);
+//        int cachedTokens = 0;
+//        JsonObject promptDetail = getObject(usage, "prompt_tokens_details");
+//        if (promptDetail.has("cached_tokens")) {
+//            cachedTokens = getInt(promptDetail, "cached_tokens", 0);
+//        }
+//        JsonObject outUsage = new JsonObject();
+//        outUsage.addProperty("cache_read_input_tokens", Math.max(0, cachedTokens));
+//        outUsage.addProperty("input_tokens", Math.max(0, promptTokens - cachedTokens));
+//        outUsage.addProperty("output_tokens", Math.max(0, completionTokens));
+//        result.add("usage", outUsage);
+//        return result;
+//    }
 
-        JsonObject message = getChoiceMessage(oaiRes);
-        JsonArray content = new JsonArray();
-        String reasoningContent = getString(message, "reasoning_content");
-        if (!reasoningContent.isEmpty()) {
-            JsonObject thinkingBlock = new JsonObject();
-            thinkingBlock.addProperty("type", "thinking");
-            thinkingBlock.addProperty("thinking", reasoningContent);
-            thinkingBlock.addProperty("signature", "");
-            content.add(thinkingBlock);
-        }
+//    @Deprecated
+//    private String convertOaiStreamChunkToAnthropicSse(JsonObject chunk, AnthropicStreamState state) {
+//        JsonObject choice = getChoice(chunk);
+//        JsonObject delta = getObject(choice, "delta");
+//
+//        StringBuilder out = new StringBuilder();
+//        if (!state.messageStarted) {
+//            out.append(buildAnthropicEvent("message_start", buildMessageStartData(chunk)));
+//            state.messageStarted = true;
+//        }
+//
+//        String reasoningDelta = getString(delta, "reasoning_content");
+//        if (!reasoningDelta.isEmpty()) {
+//            state.hasThinking = true;
+//            if (!state.thinkingStarted) {
+//                out.append(buildAnthropicEvent("content_block_start", buildContentBlockStart(0, "thinking", "", "")));
+//                state.thinkingStarted = true;
+//            }
+//            out.append(buildAnthropicEvent("content_block_delta", buildThinkingDelta(0, reasoningDelta)));
+//            state.outputTokens++;
+//        }
+//
+//        String textDelta = getString(delta, "content");
+//        if (!textDelta.isEmpty()) {
+//            if (!state.textStarted) {
+//                state.hasText = true;
+//                out.append(buildAnthropicEvent("content_block_start", buildContentBlockStart(state.getTextIndex(), "text", "", "")));
+//                state.textStarted = true;
+//            }
+//            out.append(buildAnthropicEvent("content_block_delta", buildTextDelta(state.getTextIndex(), textDelta)));
+//            state.outputTokens++;
+//        }
+//
+//        JsonElement toolCallsEl = delta.get("tool_calls");
+//        if (toolCallsEl != null && toolCallsEl.isJsonArray()) {
+//            JsonArray toolCalls = toolCallsEl.getAsJsonArray();
+//            for (int i = 0; i < toolCalls.size(); i++) {
+//                JsonElement tcEl = toolCalls.get(i);
+//                if (tcEl == null || !tcEl.isJsonObject()) {
+//                    continue;
+//                }
+//                JsonObject tc = tcEl.getAsJsonObject();
+//                int idx = getInt(tc, "index", i);
+//                ToolCallState toolState = state.toolStates.computeIfAbsent(idx, k -> new ToolCallState());
+//                String id = getString(tc, "id");
+//                if (!id.isEmpty()) {
+//                    toolState.id = id;
+//                }
+//                JsonObject function = getObject(tc, "function");
+//                String name = getString(function, "name");
+//                if (!name.isEmpty()) {
+//                    toolState.name = name;
+//                }
+//                int blockIndex = state.getToolIndex(idx);
+//                if (!state.toolStartedIndexes.contains(idx) && !toolState.name.isEmpty()) {
+//                    out.append(buildAnthropicEvent("content_block_start", buildContentBlockStart(blockIndex, "tool_use", toolState.id, toolState.name)));
+//                    state.toolStartedIndexes.add(idx);
+//                }
+//                String argumentsDelta = getString(function, "arguments");
+//                if (!argumentsDelta.isEmpty()) {
+//                    out.append(buildAnthropicEvent("content_block_delta", buildInputJsonDelta(blockIndex, argumentsDelta)));
+//                    state.outputTokens++;
+//                }
+//            }
+//        }
+//
+//        JsonObject usage = getObject(chunk, "usage");
+//        int completionTokens = getInt(usage, "completion_tokens", -1);
+//        if (completionTokens >= 0) {
+//            state.outputTokens = Math.max(state.outputTokens, completionTokens);
+//        }
+//
+//        String finishReason = getString(choice, "finish_reason");
+//        if (!finishReason.isEmpty() && !"null".equalsIgnoreCase(finishReason)) {
+//            state.stopReason = mapStopReason(finishReason, null);
+//            if (!state.finished) {
+//                out.append(buildAnthropicStopEvents(state));
+//                state.finished = true;
+//            }
+//        }
+//
+//        return out.toString();
+//    }
 
-        String text = extractAssistantText(message.get("content"));
-        if (!text.isEmpty()) {
-            JsonObject textBlock = new JsonObject();
-            textBlock.addProperty("type", "text");
-            textBlock.addProperty("text", text);
-            content.add(textBlock);
-        }
+//    @Deprecated
+//    private JsonObject buildMessageStartData(JsonObject chunk) {
+//        JsonObject message = new JsonObject();
+//        message.addProperty("id", getString(chunk, "id"));
+//        message.addProperty("type", "message");
+//        message.addProperty("role", "assistant");
+//        message.add("content", new JsonArray());
+//        message.addProperty("model", getString(chunk, "model"));
+//        message.add("stop_reason", null);
+//        message.add("stop_sequence", null);
+//
+//        JsonObject usage = getObject(chunk, "usage");
+//        int promptTokens = getInt(usage, "prompt_tokens", 0);
+//        int cachedTokens = 0;
+//        JsonObject promptDetail = getObject(usage, "prompt_tokens_details");
+//        if (promptDetail.has("cached_tokens")) {
+//            cachedTokens = getInt(promptDetail, "cached_tokens", 0);
+//        }
+//        JsonObject msgUsage = new JsonObject();
+//        msgUsage.addProperty("cache_read_input_tokens", Math.max(0, cachedTokens));
+//        int inputTokens = Math.max(0, promptTokens - cachedTokens);
+//        if (inputTokens == 0) {
+//            inputTokens = 1;
+//        }
+//        msgUsage.addProperty("input_tokens", inputTokens);
+//        msgUsage.addProperty("output_tokens", 0);
+//        message.add("usage", msgUsage);
+//
+//        JsonObject data = new JsonObject();
+//        data.addProperty("type", "message_start");
+//        data.add("message", message);
+//        return data;
+//    }
 
-        if (message.has("tool_calls") && message.get("tool_calls").isJsonArray()) {
-            JsonArray toolCalls = message.getAsJsonArray("tool_calls");
-            for (int i = 0; i < toolCalls.size(); i++) {
-                JsonElement tcEl = toolCalls.get(i);
-                if (tcEl == null || !tcEl.isJsonObject()) {
-                    continue;
-                }
-                JsonObject tc = tcEl.getAsJsonObject();
-                JsonObject function = getObject(tc, "function");
-                JsonObject toolUse = new JsonObject();
-                toolUse.addProperty("type", "tool_use");
-                toolUse.addProperty("id", getString(tc, "id"));
-                toolUse.addProperty("name", getString(function, "name"));
-                String arguments = getString(function, "arguments");
-                JsonElement input = tryParseJson(arguments);
-                if (input != null && input.isJsonObject()) {
-                    toolUse.add("input", input);
-                } else {
-                    toolUse.add("input", new JsonObject());
-                }
-                content.add(toolUse);
-            }
-        }
-        result.add("content", content);
-
-        JsonObject choice = getChoice(oaiRes);
-        String finishReason = getString(choice, "finish_reason");
-        result.addProperty("stop_reason", mapStopReason(finishReason, message));
-        JsonElement stop = choice.get("stop_sequence");
-        if (stop != null && !stop.isJsonNull()) {
-            result.add("stop_sequence", stop.deepCopy());
-        } else {
-            result.add("stop_sequence", null);
-        }
-
-        JsonObject usage = getObject(oaiRes, "usage");
-        int promptTokens = getInt(usage, "prompt_tokens", 0);
-        int completionTokens = getInt(usage, "completion_tokens", 0);
-        int cachedTokens = 0;
-        JsonObject promptDetail = getObject(usage, "prompt_tokens_details");
-        if (promptDetail.has("cached_tokens")) {
-            cachedTokens = getInt(promptDetail, "cached_tokens", 0);
-        }
-        JsonObject outUsage = new JsonObject();
-        outUsage.addProperty("cache_read_input_tokens", Math.max(0, cachedTokens));
-        outUsage.addProperty("input_tokens", Math.max(0, promptTokens - cachedTokens));
-        outUsage.addProperty("output_tokens", Math.max(0, completionTokens));
-        result.add("usage", outUsage);
-        return result;
-    }
-
-    @Deprecated
-    private String convertOaiStreamChunkToAnthropicSse(JsonObject chunk, AnthropicStreamState state) {
-        JsonObject choice = getChoice(chunk);
-        JsonObject delta = getObject(choice, "delta");
-
-        StringBuilder out = new StringBuilder();
-        if (!state.messageStarted) {
-            out.append(buildAnthropicEvent("message_start", buildMessageStartData(chunk)));
-            state.messageStarted = true;
-        }
-
-        String reasoningDelta = getString(delta, "reasoning_content");
-        if (!reasoningDelta.isEmpty()) {
-            state.hasThinking = true;
-            if (!state.thinkingStarted) {
-                out.append(buildAnthropicEvent("content_block_start", buildContentBlockStart(0, "thinking", "", "")));
-                state.thinkingStarted = true;
-            }
-            out.append(buildAnthropicEvent("content_block_delta", buildThinkingDelta(0, reasoningDelta)));
-            state.outputTokens++;
-        }
-
-        String textDelta = getString(delta, "content");
-        if (!textDelta.isEmpty()) {
-            if (!state.textStarted) {
-                state.hasText = true;
-                out.append(buildAnthropicEvent("content_block_start", buildContentBlockStart(state.getTextIndex(), "text", "", "")));
-                state.textStarted = true;
-            }
-            out.append(buildAnthropicEvent("content_block_delta", buildTextDelta(state.getTextIndex(), textDelta)));
-            state.outputTokens++;
-        }
-
-        JsonElement toolCallsEl = delta.get("tool_calls");
-        if (toolCallsEl != null && toolCallsEl.isJsonArray()) {
-            JsonArray toolCalls = toolCallsEl.getAsJsonArray();
-            for (int i = 0; i < toolCalls.size(); i++) {
-                JsonElement tcEl = toolCalls.get(i);
-                if (tcEl == null || !tcEl.isJsonObject()) {
-                    continue;
-                }
-                JsonObject tc = tcEl.getAsJsonObject();
-                int idx = getInt(tc, "index", i);
-                ToolCallState toolState = state.toolStates.computeIfAbsent(idx, k -> new ToolCallState());
-                String id = getString(tc, "id");
-                if (!id.isEmpty()) {
-                    toolState.id = id;
-                }
-                JsonObject function = getObject(tc, "function");
-                String name = getString(function, "name");
-                if (!name.isEmpty()) {
-                    toolState.name = name;
-                }
-                int blockIndex = state.getToolIndex(idx);
-                if (!state.toolStartedIndexes.contains(idx) && !toolState.name.isEmpty()) {
-                    out.append(buildAnthropicEvent("content_block_start", buildContentBlockStart(blockIndex, "tool_use", toolState.id, toolState.name)));
-                    state.toolStartedIndexes.add(idx);
-                }
-                String argumentsDelta = getString(function, "arguments");
-                if (!argumentsDelta.isEmpty()) {
-                    out.append(buildAnthropicEvent("content_block_delta", buildInputJsonDelta(blockIndex, argumentsDelta)));
-                    state.outputTokens++;
-                }
-            }
-        }
-
-        JsonObject usage = getObject(chunk, "usage");
-        int completionTokens = getInt(usage, "completion_tokens", -1);
-        if (completionTokens >= 0) {
-            state.outputTokens = Math.max(state.outputTokens, completionTokens);
-        }
-
-        String finishReason = getString(choice, "finish_reason");
-        if (!finishReason.isEmpty() && !"null".equalsIgnoreCase(finishReason)) {
-            state.stopReason = mapStopReason(finishReason, null);
-            if (!state.finished) {
-                out.append(buildAnthropicStopEvents(state));
-                state.finished = true;
-            }
-        }
-
-        return out.toString();
-    }
-
-    @Deprecated
-    private JsonObject buildMessageStartData(JsonObject chunk) {
-        JsonObject message = new JsonObject();
-        message.addProperty("id", getString(chunk, "id"));
-        message.addProperty("type", "message");
-        message.addProperty("role", "assistant");
-        message.add("content", new JsonArray());
-        message.addProperty("model", getString(chunk, "model"));
-        message.add("stop_reason", null);
-        message.add("stop_sequence", null);
-
-        JsonObject usage = getObject(chunk, "usage");
-        int promptTokens = getInt(usage, "prompt_tokens", 0);
-        int cachedTokens = 0;
-        JsonObject promptDetail = getObject(usage, "prompt_tokens_details");
-        if (promptDetail.has("cached_tokens")) {
-            cachedTokens = getInt(promptDetail, "cached_tokens", 0);
-        }
-        JsonObject msgUsage = new JsonObject();
-        msgUsage.addProperty("cache_read_input_tokens", Math.max(0, cachedTokens));
-        int inputTokens = Math.max(0, promptTokens - cachedTokens);
-        if (inputTokens == 0) {
-            inputTokens = 1;
-        }
-        msgUsage.addProperty("input_tokens", inputTokens);
-        msgUsage.addProperty("output_tokens", 0);
-        message.add("usage", msgUsage);
-
-        JsonObject data = new JsonObject();
-        data.addProperty("type", "message_start");
-        data.add("message", message);
-        return data;
-    }
-
-    @Deprecated
-    private JsonObject buildContentBlockStart(int index, String type, String id, String name) {
-        JsonObject contentBlock = new JsonObject();
-        contentBlock.addProperty("type", type);
-        if ("thinking".equals(type)) {
-            contentBlock.addProperty("thinking", "");
-        } else if ("text".equals(type)) {
-            contentBlock.addProperty("text", "");
-        } else if ("tool_use".equals(type)) {
-            contentBlock.addProperty("id", id == null ? "" : id);
-            contentBlock.addProperty("name", name == null ? "" : name);
-        }
-        JsonObject data = new JsonObject();
-        data.addProperty("type", "content_block_start");
-        data.addProperty("index", index);
-        data.add("content_block", contentBlock);
-        return data;
-    }
-
-    @Deprecated
-    private JsonObject buildThinkingDelta(int index, String deltaText) {
-        JsonObject delta = new JsonObject();
-        delta.addProperty("type", "thinking_delta");
-        delta.addProperty("thinking", deltaText);
-        JsonObject data = new JsonObject();
-        data.addProperty("type", "content_block_delta");
-        data.addProperty("index", index);
-        data.add("delta", delta);
-        return data;
-    }
-
-    @Deprecated
-    private JsonObject buildTextDelta(int index, String deltaText) {
-        JsonObject delta = new JsonObject();
-        delta.addProperty("type", "text_delta");
-        delta.addProperty("text", deltaText);
-        JsonObject data = new JsonObject();
-        data.addProperty("type", "content_block_delta");
-        data.addProperty("index", index);
-        data.add("delta", delta);
-        return data;
-    }
-
-    @Deprecated
-    private JsonObject buildInputJsonDelta(int index, String partialJson) {
-        JsonObject delta = new JsonObject();
-        delta.addProperty("type", "input_json_delta");
-        delta.addProperty("partial_json", partialJson);
-        JsonObject data = new JsonObject();
-        data.addProperty("type", "content_block_delta");
-        data.addProperty("index", index);
-        data.add("delta", delta);
-        return data;
-    }
-
-    @Deprecated
-    private String buildAnthropicStopEvents(AnthropicStreamState state) {
-        StringBuilder out = new StringBuilder();
-        if (state.thinkingStarted) {
-            JsonObject signatureData = new JsonObject();
-            signatureData.addProperty("type", "content_block_delta");
-            signatureData.addProperty("index", 0);
-            JsonObject delta = new JsonObject();
-            delta.addProperty("type", "signature_delta");
-            delta.addProperty("signature", "");
-            signatureData.add("delta", delta);
-            out.append(buildAnthropicEvent("content_block_delta", signatureData));
-
-            JsonObject stopData = new JsonObject();
-            stopData.addProperty("type", "content_block_stop");
-            stopData.addProperty("index", 0);
-            out.append(buildAnthropicEvent("content_block_stop", stopData));
-        }
-        if (state.textStarted) {
-            JsonObject stopData = new JsonObject();
-            stopData.addProperty("type", "content_block_stop");
-            stopData.addProperty("index", state.getTextIndex());
-            out.append(buildAnthropicEvent("content_block_stop", stopData));
-        }
-        for (Integer idx : state.toolStartedIndexes) {
-            JsonObject stopData = new JsonObject();
-            stopData.addProperty("type", "content_block_stop");
-            stopData.addProperty("index", state.getToolIndex(idx));
-            out.append(buildAnthropicEvent("content_block_stop", stopData));
-        }
-
-        JsonObject messageDelta = new JsonObject();
-        messageDelta.addProperty("type", "message_delta");
-        JsonObject deltaObj = new JsonObject();
-        deltaObj.addProperty("stop_reason", state.stopReason == null ? "end_turn" : state.stopReason);
-        deltaObj.add("stop_sequence", null);
-        messageDelta.add("delta", deltaObj);
-        JsonObject usage = new JsonObject();
-        usage.addProperty("output_tokens", Math.max(1, state.outputTokens));
-        messageDelta.add("usage", usage);
-        out.append(buildAnthropicEvent("message_delta", messageDelta));
-
-        JsonObject messageStop = new JsonObject();
-        messageStop.addProperty("type", "message_stop");
-        out.append(buildAnthropicEvent("message_stop", messageStop));
-        return out.toString();
-    }
-
-    private void writeSseChunk(ChannelHandlerContext ctx, String sseData) {
-        if (sseData == null || sseData.isEmpty()) {
-            return;
-        }
-        ByteBuf content = ctx.alloc().buffer();
-        content.writeBytes(sseData.getBytes(StandardCharsets.UTF_8));
-        HttpContent httpContent = new DefaultHttpContent(content);
-        ctx.writeAndFlush(httpContent);
-    }
-
-    @Deprecated
-    private String buildAnthropicEvent(String event, JsonObject data) {
-        return "event: " + event + "\n" + "data: " + JsonUtil.toJson(data) + "\n\n";
-    }
-
-    private JsonObject getChoice(JsonObject root) {
-        if (root == null || !root.has("choices") || !root.get("choices").isJsonArray()) {
-            return new JsonObject();
-        }
-        JsonArray choices = root.getAsJsonArray("choices");
-        if (choices.size() == 0 || !choices.get(0).isJsonObject()) {
-            return new JsonObject();
-        }
-        return choices.get(0).getAsJsonObject();
-    }
-
-    private JsonObject getChoiceMessage(JsonObject root) {
-        JsonObject choice = getChoice(root);
-        if (choice.has("message") && choice.get("message").isJsonObject()) {
-            return choice.getAsJsonObject("message");
-        }
-        return new JsonObject();
-    }
-
-    private String extractAssistantText(JsonElement contentEl) {
-        if (contentEl == null || contentEl.isJsonNull()) {
-            return "";
-        }
-        if (contentEl.isJsonPrimitive()) {
-            try {
-                return contentEl.getAsString();
-            } catch (Exception ignore) {
-                return "";
-            }
-        }
-        if (contentEl.isJsonArray()) {
-            StringBuilder sb = new StringBuilder();
-            JsonArray arr = contentEl.getAsJsonArray();
-            for (int i = 0; i < arr.size(); i++) {
-                JsonElement itemEl = arr.get(i);
-                if (itemEl == null || !itemEl.isJsonObject()) {
-                    continue;
-                }
-                JsonObject item = itemEl.getAsJsonObject();
-                if ("text".equals(getString(item, "type"))) {
-                    sb.append(getString(item, "text"));
-                }
-            }
-            return sb.toString();
-        }
-        return "";
-    }
-
-    private String mapStopReason(String finishReason, JsonObject message) {
-        if ("length".equals(finishReason) || "max_tokens".equals(finishReason)) {
-            return "max_tokens";
-        }
-        boolean hasToolCalls = message != null && message.has("tool_calls") && message.get("tool_calls").isJsonArray() && message.getAsJsonArray("tool_calls").size() > 0;
-        if ("tool_calls".equals(finishReason) || "function_call".equals(finishReason) || hasToolCalls) {
-            return "tool_use";
-        }
-        return "end_turn";
-    }
-
-    private JsonElement tryParseJson(String text) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        try {
-            return JsonParser.parseString(text);
-        } catch (Exception ignore) {
-            return null;
-        }
-    }
-
-    private int getInt(JsonObject obj, String key, int fallback) {
-        if (obj == null || key == null || !obj.has(key) || obj.get(key).isJsonNull()) {
-            return fallback;
-        }
-        try {
-            return obj.get(key).getAsInt();
-        } catch (Exception e) {
-            return fallback;
-        }
-    }
-
-    @Deprecated
-    private static class ToolCallState {
-        private String id = "";
-        private String name = "";
-    }
-
-    @Deprecated
-    private static class AnthropicStreamState {
-        private boolean messageStarted = false;
-        private boolean hasThinking = false;
-        private boolean thinkingStarted = false;
-        private boolean hasText = false;
-        private boolean textStarted = false;
-        private boolean finished = false;
-        private String stopReason = "end_turn";
-        private int outputTokens = 0;
-        private final Map<Integer, ToolCallState> toolStates = new HashMap<>();
-        private final Set<Integer> toolStartedIndexes = new HashSet<>();
-
-        private int getTextIndex() {
-            return hasThinking ? 1 : 0;
-        }
-
-        private int getToolIndex(int toolCallIndex) {
-            int base = (hasThinking ? 1 : 0) + (hasText ? 1 : 0);
-            return base + toolCallIndex;
-        }
-    }
+//    @Deprecated
+//    private JsonObject buildContentBlockStart(int index, String type, String id, String name) {
+//        JsonObject contentBlock = new JsonObject();
+//        contentBlock.addProperty("type", type);
+//        if ("thinking".equals(type)) {
+//            contentBlock.addProperty("thinking", "");
+//        } else if ("text".equals(type)) {
+//            contentBlock.addProperty("text", "");
+//        } else if ("tool_use".equals(type)) {
+//            contentBlock.addProperty("id", id == null ? "" : id);
+//            contentBlock.addProperty("name", name == null ? "" : name);
+//        }
+//        JsonObject data = new JsonObject();
+//        data.addProperty("type", "content_block_start");
+//        data.addProperty("index", index);
+//        data.add("content_block", contentBlock);
+//        return data;
+//    }
+//
+//    @Deprecated
+//    private JsonObject buildThinkingDelta(int index, String deltaText) {
+//        JsonObject delta = new JsonObject();
+//        delta.addProperty("type", "thinking_delta");
+//        delta.addProperty("thinking", deltaText);
+//        JsonObject data = new JsonObject();
+//        data.addProperty("type", "content_block_delta");
+//        data.addProperty("index", index);
+//        data.add("delta", delta);
+//        return data;
+//    }
+//
+//    @Deprecated
+//    private JsonObject buildTextDelta(int index, String deltaText) {
+//        JsonObject delta = new JsonObject();
+//        delta.addProperty("type", "text_delta");
+//        delta.addProperty("text", deltaText);
+//        JsonObject data = new JsonObject();
+//        data.addProperty("type", "content_block_delta");
+//        data.addProperty("index", index);
+//        data.add("delta", delta);
+//        return data;
+//    }
+//
+//    @Deprecated
+//    private JsonObject buildInputJsonDelta(int index, String partialJson) {
+//        JsonObject delta = new JsonObject();
+//        delta.addProperty("type", "input_json_delta");
+//        delta.addProperty("partial_json", partialJson);
+//        JsonObject data = new JsonObject();
+//        data.addProperty("type", "content_block_delta");
+//        data.addProperty("index", index);
+//        data.add("delta", delta);
+//        return data;
+//    }
+//
+//    @Deprecated
+//    private String buildAnthropicStopEvents(AnthropicStreamState state) {
+//        StringBuilder out = new StringBuilder();
+//        if (state.thinkingStarted) {
+//            JsonObject signatureData = new JsonObject();
+//            signatureData.addProperty("type", "content_block_delta");
+//            signatureData.addProperty("index", 0);
+//            JsonObject delta = new JsonObject();
+//            delta.addProperty("type", "signature_delta");
+//            delta.addProperty("signature", "");
+//            signatureData.add("delta", delta);
+//            out.append(buildAnthropicEvent("content_block_delta", signatureData));
+//
+//            JsonObject stopData = new JsonObject();
+//            stopData.addProperty("type", "content_block_stop");
+//            stopData.addProperty("index", 0);
+//            out.append(buildAnthropicEvent("content_block_stop", stopData));
+//        }
+//        if (state.textStarted) {
+//            JsonObject stopData = new JsonObject();
+//            stopData.addProperty("type", "content_block_stop");
+//            stopData.addProperty("index", state.getTextIndex());
+//            out.append(buildAnthropicEvent("content_block_stop", stopData));
+//        }
+//        for (Integer idx : state.toolStartedIndexes) {
+//            JsonObject stopData = new JsonObject();
+//            stopData.addProperty("type", "content_block_stop");
+//            stopData.addProperty("index", state.getToolIndex(idx));
+//            out.append(buildAnthropicEvent("content_block_stop", stopData));
+//        }
+//
+//        JsonObject messageDelta = new JsonObject();
+//        messageDelta.addProperty("type", "message_delta");
+//        JsonObject deltaObj = new JsonObject();
+//        deltaObj.addProperty("stop_reason", state.stopReason == null ? "end_turn" : state.stopReason);
+//        deltaObj.add("stop_sequence", null);
+//        messageDelta.add("delta", deltaObj);
+//        JsonObject usage = new JsonObject();
+//        usage.addProperty("output_tokens", Math.max(1, state.outputTokens));
+//        messageDelta.add("usage", usage);
+//        out.append(buildAnthropicEvent("message_delta", messageDelta));
+//
+//        JsonObject messageStop = new JsonObject();
+//        messageStop.addProperty("type", "message_stop");
+//        out.append(buildAnthropicEvent("message_stop", messageStop));
+//        return out.toString();
+//    }
+//
+//    private void writeSseChunk(ChannelHandlerContext ctx, String sseData) {
+//        if (sseData == null || sseData.isEmpty()) {
+//            return;
+//        }
+//        ByteBuf content = ctx.alloc().buffer();
+//        content.writeBytes(sseData.getBytes(StandardCharsets.UTF_8));
+//        HttpContent httpContent = new DefaultHttpContent(content);
+//        ctx.writeAndFlush(httpContent);
+//    }
+//
+//    @Deprecated
+//    private String buildAnthropicEvent(String event, JsonObject data) {
+//        return "event: " + event + "\n" + "data: " + JsonUtil.toJson(data) + "\n\n";
+//    }
+//
+//    private JsonObject getChoice(JsonObject root) {
+//        if (root == null || !root.has("choices") || !root.get("choices").isJsonArray()) {
+//            return new JsonObject();
+//        }
+//        JsonArray choices = root.getAsJsonArray("choices");
+//        if (choices.size() == 0 || !choices.get(0).isJsonObject()) {
+//            return new JsonObject();
+//        }
+//        return choices.get(0).getAsJsonObject();
+//    }
+//
+//    private JsonObject getChoiceMessage(JsonObject root) {
+//        JsonObject choice = getChoice(root);
+//        if (choice.has("message") && choice.get("message").isJsonObject()) {
+//            return choice.getAsJsonObject("message");
+//        }
+//        return new JsonObject();
+//    }
+//
+//    private String extractAssistantText(JsonElement contentEl) {
+//        if (contentEl == null || contentEl.isJsonNull()) {
+//            return "";
+//        }
+//        if (contentEl.isJsonPrimitive()) {
+//            try {
+//                return contentEl.getAsString();
+//            } catch (Exception ignore) {
+//                return "";
+//            }
+//        }
+//        if (contentEl.isJsonArray()) {
+//            StringBuilder sb = new StringBuilder();
+//            JsonArray arr = contentEl.getAsJsonArray();
+//            for (int i = 0; i < arr.size(); i++) {
+//                JsonElement itemEl = arr.get(i);
+//                if (itemEl == null || !itemEl.isJsonObject()) {
+//                    continue;
+//                }
+//                JsonObject item = itemEl.getAsJsonObject();
+//                if ("text".equals(getString(item, "type"))) {
+//                    sb.append(getString(item, "text"));
+//                }
+//            }
+//            return sb.toString();
+//        }
+//        return "";
+//    }
+//
+//    private String mapStopReason(String finishReason, JsonObject message) {
+//        if ("length".equals(finishReason) || "max_tokens".equals(finishReason)) {
+//            return "max_tokens";
+//        }
+//        boolean hasToolCalls = message != null && message.has("tool_calls") && message.get("tool_calls").isJsonArray() && message.getAsJsonArray("tool_calls").size() > 0;
+//        if ("tool_calls".equals(finishReason) || "function_call".equals(finishReason) || hasToolCalls) {
+//            return "tool_use";
+//        }
+//        return "end_turn";
+//    }
+//
+//    private JsonElement tryParseJson(String text) {
+//        if (text == null || text.isBlank()) {
+//            return null;
+//        }
+//        try {
+//            return JsonParser.parseString(text);
+//        } catch (Exception ignore) {
+//            return null;
+//        }
+//    }
+//
+//    private int getInt(JsonObject obj, String key, int fallback) {
+//        if (obj == null || key == null || !obj.has(key) || obj.get(key).isJsonNull()) {
+//            return fallback;
+//        }
+//        try {
+//            return obj.get(key).getAsInt();
+//        } catch (Exception e) {
+//            return fallback;
+//        }
+//    }
+//
+//    @Deprecated
+//    private static class ToolCallState {
+//        private String id = "";
+//        private String name = "";
+//    }
+//
+//    @Deprecated
+//    private static class AnthropicStreamState {
+//        private boolean messageStarted = false;
+//        private boolean hasThinking = false;
+//        private boolean thinkingStarted = false;
+//        private boolean hasText = false;
+//        private boolean textStarted = false;
+//        private boolean finished = false;
+//        private String stopReason = "end_turn";
+//        private int outputTokens = 0;
+//        private final Map<Integer, ToolCallState> toolStates = new HashMap<>();
+//        private final Set<Integer> toolStartedIndexes = new HashSet<>();
+//
+//        private int getTextIndex() {
+//            return hasThinking ? 1 : 0;
+//        }
+//
+//        private int getToolIndex(int toolCallIndex) {
+//            int base = (hasThinking ? 1 : 0) + (hasText ? 1 : 0);
+//            return base + toolCallIndex;
+//        }
+//    }
     
     
     
