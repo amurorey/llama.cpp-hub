@@ -15,6 +15,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import com.google.gson.Gson;
 import org.mark.llamacpp.server.tools.JsonUtil;
 import com.google.gson.reflect.TypeToken;
@@ -48,6 +51,10 @@ public class DownloadTaskManager implements Closeable {
 	private final Map<String, RuntimeTaskContext> runtimeStore = new ConcurrentHashMap<>();
 	private final Map<String, DownloadProgressListener> listeners = new ConcurrentHashMap<>();
 	private final Object fileLock = new Object();
+	private final ScheduledExecutorService cleanupScheduler = new ScheduledThreadPoolExecutor(
+			1, Thread.ofVirtual().name("download-cleanup-", 0).factory());
+
+	private static final long COMPLETED_TASK_TTL_MS = 5 * 60 * 1000;
 
 	private DownloadTaskManager(Path cacheFile, int maxConcurrentTasks) throws IOException {
 		Objects.requireNonNull(cacheFile, "cacheFile");
@@ -58,6 +65,7 @@ public class DownloadTaskManager implements Closeable {
 		this.workerPool = Executors.newFixedThreadPool(maxConcurrentTasks);
 		loadFromCache();
 		addProgressListener(new DownloadWebSocketListener());
+		this.cleanupScheduler.scheduleWithFixedDelay(this::cleanupStaleTasks, 5, 5, TimeUnit.MINUTES);
 	}
 
 	public DownloadTaskInfo createTask(String sourceUrl, Path targetFile, int threadCount) throws IOException {
@@ -251,12 +259,37 @@ public class DownloadTaskManager implements Closeable {
 
 	@Override
 	public void close() {
+		this.cleanupScheduler.shutdownNow();
 		for (RuntimeTaskContext context : this.runtimeStore.values()) {
 			context.downloader.requestStop();
 			context.future.cancel(true);
 		}
 		this.runtimeStore.clear();
 		this.workerPool.shutdownNow();
+	}
+
+	private void cleanupStaleTasks() {
+		try {
+			long threshold = System.currentTimeMillis() - COMPLETED_TASK_TTL_MS;
+			List<String> toRemove = new ArrayList<>();
+			for (Map.Entry<String, DownloadTaskInfo> entry : this.taskStore.entrySet()) {
+				DownloadTaskInfo task = entry.getValue();
+				if ((task.getStatus() == DownloadTaskStatus.COMPLETED || task.getStatus() == DownloadTaskStatus.FAILED)
+						&& task.getUpdatedAt() < threshold) {
+					toRemove.add(entry.getKey());
+				}
+			}
+			if (!toRemove.isEmpty()) {
+				for (String taskId : toRemove) {
+					this.taskStore.remove(taskId);
+					this.runtimeStore.remove(taskId);
+				}
+				persistToCache();
+				logger.debug("Cleaned up {} completed/failed download tasks", toRemove.size());
+			}
+		} catch (Exception e) {
+			logger.warn("Failed to cleanup stale download tasks", e);
+		}
 	}
 
 	private DownloadTaskInfo requireTask(String taskId) {
