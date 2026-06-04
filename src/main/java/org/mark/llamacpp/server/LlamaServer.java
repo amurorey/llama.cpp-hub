@@ -1,7 +1,9 @@
 package org.mark.llamacpp.server;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.RandomAccessFile;
 import java.lang.management.ManagementFactory;
@@ -83,6 +85,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.stream.ChunkedFile;
+import io.netty.handler.stream.ChunkedInput;
 import io.netty.handler.stream.ChunkedWriteHandler;
 import io.netty.util.CharsetUtil;
 
@@ -1560,14 +1563,115 @@ public class LlamaServer {
 		ByteBuf prefixBuf = Unpooled.copiedBuffer(prefix, StandardCharsets.UTF_8);
 		ctx.write(new DefaultHttpContent(prefixBuf));
 
-		RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r");
-		long fileLength = raf.length();
-		ctx.write(new ChunkedFile(raf, 0, fileLength, 8192));
-
+		FileInputStream fis = new FileInputStream(file.toFile());
+		long fileLength = file.toFile().length();
 		ByteBuf suffixBuf = Unpooled.copiedBuffer(suffix, StandardCharsets.UTF_8);
-		ctx.write(new DefaultHttpContent(suffixBuf));
+		ChunkedInput<ByteBuf> combined = new PrefixFileSuffixInput(fis, fileLength, suffixBuf);
+		ctx.write(combined);
 
 		ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT).addListener(future -> ctx.close());
+	}
+
+	/**
+	 * 将 prefix ByteBuf → 文件流 → suffix ByteBuf 合并为单一 ChunkedInput。
+	 * ChunkedWriteHandler 对单一 ChunkedInput 会循环 readChunk 直到返回 null，
+	 * 不会中途穿插处理缓冲区中的其他消息，从而避免 suffix 和 LastHttpContent
+	 * 在文件传输完成前被提前写入导致响应截断。
+	 */
+	public static class PrefixFileSuffixInput implements ChunkedInput<ByteBuf> {
+		private static final int CHUNK_SIZE = 8192;
+
+		private final InputStream fileStream;
+		private final ByteBuf suffixBuf;
+		private final long fileLength;
+		private final byte[] chunkBuffer = new byte[CHUNK_SIZE];
+		private volatile State state = State.FILE;
+		private boolean closed;
+		private long fileProgress;
+
+		private enum State { FILE, SUFFIX, DONE }
+
+		PrefixFileSuffixInput(InputStream fileStream, long fileLength, ByteBuf suffixBuf) {
+			this.fileStream = fileStream;
+			this.fileLength = fileLength;
+			this.suffixBuf = suffixBuf;
+		}
+
+		@Override
+		public ByteBuf readChunk(io.netty.buffer.ByteBufAllocator alloc) throws IOException {
+			return doReadChunk(alloc);
+		}
+
+		@Override
+		public ByteBuf readChunk(io.netty.channel.ChannelHandlerContext ctx) throws IOException {
+			return doReadChunk(ctx.alloc());
+		}
+
+		private ByteBuf doReadChunk(io.netty.buffer.ByteBufAllocator alloc) throws IOException {
+			if (state == State.DONE) return null;
+
+			if (state == State.FILE) {
+				int len = fileStream.read(chunkBuffer);
+				if (len <= 0) {
+					fileStream.close();
+					state = State.SUFFIX;
+					return doReadChunk(alloc);
+				}
+				fileProgress += len;
+				ByteBuf chunk = alloc.buffer(len);
+				chunk.writeBytes(chunkBuffer, 0, len);
+				return chunk;
+			}
+
+			if (state == State.SUFFIX && suffixBuf.readableBytes() > 0) {
+				int remaining = suffixBuf.readableBytes();
+				if (remaining <= CHUNK_SIZE) {
+					ByteBuf chunk = suffixBuf.retainedSlice(suffixBuf.readerIndex(), remaining);
+					state = State.DONE;
+					return chunk;
+				} else {
+					ByteBuf chunk = suffixBuf.retainedSlice(suffixBuf.readerIndex(), CHUNK_SIZE);
+					suffixBuf.skipBytes(CHUNK_SIZE);
+					return chunk;
+				}
+			}
+
+			state = State.DONE;
+			return null;
+		}
+
+		@Override
+		public boolean isEndOfInput() throws IOException {
+			return state == State.DONE;
+		}
+
+		@Override
+		public void close() throws IOException {
+			if (closed) return;
+			closed = true;
+			try {
+				fileStream.close();
+			} catch (IOException e) {
+				// ignore
+			}
+			suffixBuf.release();
+		}
+
+		public boolean isClosed() {
+			return closed;
+		}
+
+		@Override
+		public long progress() {
+			if (state == State.FILE) return fileProgress;
+			if (state == State.DONE) return fileLength + suffixBuf.capacity();
+			return fileLength;
+		}
+
+		@Override
+		public long length() {
+			return fileLength + suffixBuf.readableBytes();
+		}
 	}
 	
 	
