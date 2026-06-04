@@ -505,6 +505,7 @@
     const EASY_CHAT_STATE_ENDPOINT = '/api/easy-chat/state';
     const EASY_CHAT_STATE_REVISION_ENDPOINT = '/api/easy-chat/state/revision';
     const EASY_CHAT_CONVERSATION_ENDPOINT = '/api/easy-chat/conversation';
+    const EASY_CHAT_CONVERSATION_SAVE_ENDPOINT = '/api/easy-chat/conversation/save';
     const EASY_CHAT_SYNC_ENDPOINT = '/api/easy-chat/sync';
     const STATE_REVISION_CONFLICT_CODE = 'STATE_REVISION_CONFLICT';
     const STATE_LOAD_TIMEOUT_MS = 30000;
@@ -522,6 +523,7 @@
     let stateLoadedFromServer = false;
     let stateLoadInProgress = false;
     let conversationLoadInProgress = false;
+    let currentConversationDirty = false;
 
     const state = {
       model: '',
@@ -2932,20 +2934,27 @@
     }
 
     function buildSyncPayload() {
-      const currentConversation = getCurrentConversation();
       return {
         baseRevision: stateRevision,
-        state: buildPersistedState(),
-        currentConversation: currentConversation && isConversationLoaded(currentConversation)
-          ? {
-              id: currentConversation.id,
-              title: typeof currentConversation.title === 'string' ? currentConversation.title : window.I18N.t('page.chat.main.status.new_conversation_short', '新对话'),
-              createdAt: Number(currentConversation.createdAt || Date.now()),
-              updatedAt: Number(currentConversation.updatedAt || Date.now()),
-              assistantId: typeof currentConversation.assistantId === 'string' ? currentConversation.assistantId : '',
-              messages: Array.isArray(currentConversation.messages) ? currentConversation.messages : []
-            }
-          : null
+        state: buildPersistedState()
+      };
+    }
+
+    function buildConversationPayload() {
+      const currentConversation = getCurrentConversation();
+      if (!currentConversation || !isConversationLoaded(currentConversation)) {
+        return null;
+      }
+      return {
+        baseRevision: stateRevision,
+        conversation: {
+          id: currentConversation.id,
+          title: typeof currentConversation.title === 'string' ? currentConversation.title : window.I18N.t('page.chat.main.status.new_conversation_short', '新对话'),
+          createdAt: Number(currentConversation.createdAt || Date.now()),
+          updatedAt: Number(currentConversation.updatedAt || Date.now()),
+          assistantId: typeof currentConversation.assistantId === 'string' ? currentConversation.assistantId : '',
+          messages: Array.isArray(currentConversation.messages) ? currentConversation.messages : []
+        }
       };
     }
 
@@ -3057,6 +3066,7 @@
 
     async function handleStateRevisionConflict() {
       pendingStatePayload = null;
+      currentConversationDirty = false;
       clearStateSaveRetryTimer();
       stateSaveInFlight = false;
       updateStorageHint(window.I18N.t('page.chat.main.settings.remote_state_changed', '检测到远端状态已变化，已停止自动覆盖，正在重新加载'));
@@ -3169,6 +3179,24 @@
       return true;
     }
 
+    async function saveConversationToServer() {
+      const payload = buildConversationPayload();
+      if (!payload) {
+        return false;
+      }
+      const json = await fetchJson(EASY_CHAT_CONVERSATION_SAVE_ENDPOINT, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+        timeoutMs: STATE_SAVE_TIMEOUT_MS
+      });
+      if (!json?.success) {
+        throw new Error(json?.error || window.I18N.t('page.chat.main.toast.save_failed', '保存失败'));
+      }
+      stateRevision = normalizeRevision(json?.data?.revision);
+      return true;
+    }
+
     async function flushStateSave(options = {}) {
       if (stateSaveTimer) {
         clearTimeout(stateSaveTimer);
@@ -3182,10 +3210,11 @@
       if (stateSaveInFlight) {
         return false;
       }
-      const payload = pendingStatePayload;
-      if (!payload) {
+      const pending = pendingStatePayload;
+      if (!pending) {
         return true;
       }
+      options = Object.assign({}, pending.saveOptions, options);
       pendingStatePayload = null;
       stateSaveInFlight = true;
       let saved = false;
@@ -3197,17 +3226,34 @@
         });
         if (!precheck.ok) {
           if (precheck.reason === 'conflict') {
-            pendingStatePayload = null;
             clearStateSaveRetryTimer();
             updateStorageHint(window.I18N.t('page.chat.main.settings.server_state_changed', '检测到服务端状态变化，已同步最新状态，本地修改请重新操作后再保存'));
           } else {
-            pendingStatePayload = payload;
+            pendingStatePayload = { saveOptions: options };
             scheduleStateSaveRetry(typeof options.retryDelay === 'number' ? options.retryDelay : 2000);
           }
           return false;
         }
-        pendingStatePayload = null;
-        saved = await writeStateToServer(payload, options);
+        if (currentConversationDirty) {
+          try {
+            await saveConversationToServer();
+          } catch (convError) {
+            console.error('Failed to save conversation', convError);
+            if (isStateRevisionConflictError(convError)) {
+              await handleStateRevisionConflict();
+              return false;
+            }
+            if (options.showErrorToast !== false) {
+              showToast('error', window.I18N.t('page.chat.main.error.save_failed', '保存会话失败：{error}').replace('{error}', convError.message || window.I18N.t('page.chat.main.misc.recording_error', '未知错误')));
+            }
+            pendingStatePayload = { saveOptions: options };
+            scheduleStateSaveRetry(typeof options.retryDelay === 'number' ? options.retryDelay : 2000);
+            return false;
+          }
+        }
+        const syncPayload = buildSyncPayload();
+        saved = await writeStateToServer(syncPayload, options);
+        currentConversationDirty = false;
         clearStateSaveRetryTimer();
         return true;
       } catch (error) {
@@ -3216,7 +3262,7 @@
           await handleStateRevisionConflict();
           return false;
         }
-        pendingStatePayload = payload;
+        pendingStatePayload = { saveOptions: options };
         updateStorageHint(window.I18N.t('page.chat.main.settings.storage_save_failed', '服务端保存失败，当前更改尚未落盘'));
         if (options.showErrorToast !== false) {
           showToast('error', window.I18N.t('page.chat.main.error.save_failed', '保存失败：{error}').replace('{error}', error.message || window.I18N.t('page.chat.main.misc.recording_error', '未知错误')));
@@ -3246,8 +3292,7 @@
         updateStorageHint(window.I18N.t('page.chat.main.settings.storage_not_loaded', '服务端状态未加载，已禁止写回以保护历史记录'));
         return Promise.resolve(false);
       }
-      const payload = clonePersistedPayload(buildSyncPayload());
-      pendingStatePayload = payload;
+      pendingStatePayload = { saveOptions: options };
       clearStateSaveRetryTimer();
       if (stateSaveTimer) {
         clearTimeout(stateSaveTimer);
@@ -3262,7 +3307,8 @@
       return Promise.resolve(true);
     }
 
-    async function loadState() {
+   async function loadState() {
+      currentConversationDirty = false;
       updateStorageHint(window.I18N.t('page.chat.main.settings.storage_loading', '正在从服务端加载聊天记录…'));
       setStateLoadGuard(true, window.I18N.t('page.chat.main.settings.storage_syncing', '正在从服务端同步聊天记录…'));
       let remoteState = {};
@@ -3933,6 +3979,7 @@
       conversation.messages.push(nextMessage);
       conversation.messageCount = conversation.messages.length;
       conversation.updatedAt = Date.now();
+      currentConversationDirty = true;
       updateConversationTitle(conversation);
       renderConversationList();
       if (options.incremental) {
@@ -3952,6 +3999,7 @@
       }
       setConversationLoadedMessages(conversation, messages, { touchUpdatedAt: true });
       conversation.updatedAt = Date.now();
+      currentConversationDirty = true;
       state.editingMessageIndex = null;
       state.editingMessageDraft = null;
       updateConversationTitle(conversation);
@@ -4562,6 +4610,7 @@
       conversation.updatedAt = Date.now();
       state.editingMessageDraft = null;
       state.editingMessageIndex = null;
+      currentConversationDirty = true;
       updateConversationTitle(conversation);
       renderConversationList();
       renderMessages();
@@ -5543,6 +5592,7 @@
       }
       setConversationLoadedMessages(conversation, []);
       conversation.updatedAt = Date.now();
+      currentConversationDirty = true;
       conversation.title = window.I18N.t('page.chat.main.status.new_conversation_short', '新对话');
       state.editingMessageIndex = null;
       state.editingMessageDraft = null;
