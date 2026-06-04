@@ -53,7 +53,19 @@ public class SamplingInjectionBuilder {
         }
     }
 
-      static void appendChatTemplateKwargs(StringBuilder sb, String modelName) {
+  /**
+     * 注入 chat_template_kwargs。
+     *
+     * 设计决策（2026-06-05）：
+     * 当后端服务配置了 chat_template_kwargs（任意内容）时，注入的 kwargs 会直接覆盖客户端发送的
+     * chat_template_kwargs，不做合并。原因：
+     * 1. 不解析请求体是核心设计原则，合并需要从 body 中提取客户端的 kwargs 再与服务端配置合并，
+     *    这会引入 JSON 解析的复杂性和性能开销。
+     * 2. 后端的配置优先级高于客户端，覆盖是预期行为。
+     * 3. 后续如需合并，可考虑在 write() 阶段用流式状态机提取 body 中的 chat_template_kwargs，
+     *    再与服务端配置做 merge。
+     */
+    static void appendChatTemplateKwargs(StringBuilder sb, String modelName) {
         JsonObject kwargs = ChatTemplateKwargsService.getInstance().getOpenAIChatTemplateKwargs(modelName);
         logger.info("[kwargs] model={}, rawKwargs={}", modelName, kwargs);
         JsonObject sampling = ModelSamplingService.getInstance().getOpenAISampling(modelName);

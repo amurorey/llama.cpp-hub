@@ -128,6 +128,9 @@ public class StreamingForwarder {
             throw failure;
         }
         if (modelName == null || modelName.isBlank()) {
+            if (extractBuffer != null && extractBuffer.length() >= MODEL_BUFFER_LIMIT) {
+                throw new ForwarderException(400, "Model field not found within first " + MODEL_BUFFER_LIMIT + " characters of request body", "model");
+            }
             throw new ForwarderException(400, "Missing required parameter: model", "model");
         }
 
