@@ -1071,7 +1071,7 @@ public class OpenAIService {
 				int responseCode = connection.getResponseCode();
 				logger.info("llama.cpp进程响应码: {}，等待时间：{}", responseCode, System.currentTimeMillis() - t);
 				ModelRequestTracker.getInstance().updatePhase(requestId, ActiveRequest.Phase.GENERATION);
-				this.handleProxyResponse(ctx, connection, responseCode, isStream, modelName, requestId);
+				this.handleProxyResponse(ctx, connection, responseCode, modelName, requestId);
 			} catch (Exception e) {
 				logger.info("转发请求到llama.cpp进程时发生错误", e);
 				if (e.getMessage() != null && e.getMessage().contains("Connection reset by peer")) {
@@ -1230,15 +1230,18 @@ public class OpenAIService {
 		return connection;
 	}
 
-	public void handleProxyResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, boolean isStream, String modelName) throws IOException {
-		this.handleProxyResponse(ctx, connection, responseCode, isStream, modelName, null, null);
+	public void handleProxyResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String modelName) throws IOException {
+		this.handleProxyResponse(ctx, connection, responseCode, modelName, null, null);
 	}
 
-	public void handleProxyResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, boolean isStream, String modelName, String requestId) throws IOException {
-		this.handleProxyResponse(ctx, connection, responseCode, isStream, modelName, requestId, null);
+	public void handleProxyResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String modelName, String requestId) throws IOException {
+		this.handleProxyResponse(ctx, connection, responseCode, modelName, requestId, null);
 	}
 
-	public void handleProxyResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, boolean isStream, String modelName, String requestId, String nodeId) throws IOException {
+	public void handleProxyResponse(ChannelHandlerContext ctx, HttpURLConnection connection, int responseCode, String modelName, String requestId, String nodeId) throws IOException {
+		String contentType = connection.getContentType();
+		boolean isStream = contentType != null && contentType.contains("text/event-stream");
+		logger.debug("[响应路由] contentType={}, isStream={}", contentType, isStream);
 		if (isStream) {
 			this.handleStreamResponse(ctx, connection, responseCode, modelName, requestId, nodeId);
 			return;

@@ -196,7 +196,7 @@ public class ChatStreamSession {
 			}
 			int responseCode = this.connection.getResponseCode();
 			ModelRequestTracker.getInstance().updatePhase(this.requestId, ActiveRequest.Phase.GENERATION);
-			this.openAIService.handleProxyResponse(this.ctx, this.connection, responseCode, result.isStream(), result.getModelName(), this.requestId, this.routingNodeId);
+			this.openAIService.handleProxyResponse(this.ctx, this.connection, responseCode, result.getModelName(), this.requestId, this.routingNodeId);
 		} catch (StreamingForwarder.ForwarderException e) {
 			if (!this.cancelled.get()) {
 				this.openAIService.sendOpenAIErrorResponseWithCleanup(this.ctx, e.getHttpStatus(), null, e.getMessage(), e.getParam());

@@ -8,8 +8,6 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,14 +16,18 @@ public class StreamingForwarder {
 
     private static final Logger logger = LoggerFactory.getLogger(StreamingForwarder.class);
 
-    private static final Pattern MODEL_PATTERN = Pattern.compile("\"model\"\\s*:\\s*\"([^\"]+)\"");
-    private static final Pattern STREAM_PATTERN = Pattern.compile("\"stream\"\\s*:\\s*(true|false)");
-
     private static final int QUEUE_CAPACITY = 16;
-    private static final int MODEL_BUFFER_LIMIT = 1024;
     private static final int CHUNK_PREVIEW_MAX = 120;
 
     private static final byte[] EOF_MARKER = new byte[0];
+
+    /* ---------- 状态机常量 ---------- */
+    private static final int STATE_NORMAL      = 0;
+    private static final int STATE_KEY_MODEL   = 1;
+    private static final int STATE_MODEL_VALUE = 2;
+    private static final int STATE_DONE        = 3;
+
+    private static final byte[] MODEL_KEY = "model".getBytes(StandardCharsets.US_ASCII);
 
     private final BlockingQueue<Object> queue = new ArrayBlockingQueue<>(QUEUE_CAPACITY);
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -34,10 +36,17 @@ public class StreamingForwarder {
 
     private final UnifiedBodyBuffer bodyBuffer = new UnifiedBodyBuffer();
 
-    private StringBuilder extractBuffer;
     private String modelName;
-    private boolean modelFound;
-    private volatile boolean stream;
+
+    /* 状态机字段（跨 chunk 持久化） */
+    private int state = STATE_NORMAL;
+    private int depth;
+    private boolean inString;
+    private int keyMatchLen;
+    private StringBuilder modelValueBuf;
+    private boolean escapePending;
+    private boolean afterColon;
+    private boolean inValueString;
 
     /* nodeId 由外部从请求头设置，不从 body 提取 */
     private volatile String nodeId;
@@ -63,7 +72,6 @@ public class StreamingForwarder {
             throw new IOException("stream closed");
         }
         long seq = chunkSeq.incrementAndGet();
-        //logger.info("[chunk#{}] {} 字节: {}", seq, chunk.length, previewChunk(chunk));
         try {
             bodyBuffer.write(chunk);
             extractFields(chunk);
@@ -92,8 +100,6 @@ public class StreamingForwarder {
         if (chunk == null || chunk.length == 0) {
             return;
         }
-        //long seq = chunkSeq.incrementAndGet();
-        //logger.info("[chunk#{} LAST] {} 字节: {}", seq, chunk.length, previewChunk(chunk));
         this.lastChunk = chunk;
     }
 
@@ -141,13 +147,10 @@ public class StreamingForwarder {
         }
 
         if (modelName == null || modelName.isBlank()) {
-            if (extractBuffer != null && extractBuffer.length() >= MODEL_BUFFER_LIMIT) {
-                throw new ForwarderException(400, "Model field not found within first " + MODEL_BUFFER_LIMIT + " characters of request body", "model");
-            }
             throw new ForwarderException(400, "Missing required parameter: model", "model");
         }
 
-        return new TransformResult(modelName, stream, nodeId);
+        return new TransformResult(modelName, nodeId);
     }
 
     /**
@@ -169,29 +172,163 @@ public class StreamingForwarder {
         }
     }
 
+    /**
+     * 基于状态机的 JSON 字段提取。
+     * 逐字节扫描，追踪嵌套深度和字符串状态，仅提取顶层 "model" 字段。
+     * 内存 O(1)，不依赖 JSON 总大小。
+     */
     void extractFields(byte[] chunk) {
-        String chunkStr = new String(chunk, StandardCharsets.UTF_8);
-        if (!modelFound) {
-            if (extractBuffer == null) {
-                extractBuffer = new StringBuilder(MODEL_BUFFER_LIMIT);
-            }
-            if (extractBuffer.length() < MODEL_BUFFER_LIMIT) {
-                extractBuffer.append(chunkStr);
-                Matcher m = MODEL_PATTERN.matcher(extractBuffer);
-                if (m.find()) {
-                    modelName = m.group(1);
-                    modelFound = true;
-                    bodyBuffer.setModelFound();
-                    logger.info("流式转发提取到模型字段: {}", modelName);
+        if (state == STATE_DONE) {
+            return;
+        }
+
+        logger.debug("[状态机] === chunk: {} 字节, preview={}", chunk.length, previewChunk(chunk));
+
+        for (int i = 0; i < chunk.length; i++) {
+            byte b = chunk[i];
+            int prevState = state;
+
+            switch (state) {
+
+                /* ===== 主状态：逐字节扫描 JSON 结构 ===== */
+                default:
+                case STATE_NORMAL: {
+                    if (escapePending) {
+                        escapePending = false;
+                        break;
+                    }
+                    if (b == '\\') {
+                        escapePending = true;
+                        break;
+                    }
+                    if (b == '"') {
+                        if (!inString) {
+                            inString = true;
+                            /* 前瞻检查：是否为顶层 "model" key */
+                            if (depth == 1 && modelName == null && matchesKey(chunk, i + 1, MODEL_KEY)) {
+                                keyMatchLen = 0;
+                                state = STATE_KEY_MODEL;
+                                logger.debug("[状态机] pos={} 匹配到 model key 开头", i);
+                                break;
+                            }
+                        } else {
+                            inString = false;
+                        }
+                        break;
+                    }
+                    if (inString) {
+                        break;
+                    }
+                    if (b == '{') {
+                        depth++;
+                        break;
+                    }
+                    if (b == '}') {
+                        depth--;
+                        if (depth < 0) depth = 0;
+                        break;
+                    }
+                    break;
+                }
+
+                /* ===== 消耗 "model" key 剩余字符（前瞻已确认匹配） ===== */
+                case STATE_KEY_MODEL: {
+                    keyMatchLen++;
+                    if (keyMatchLen == MODEL_KEY.length) {
+                        afterColon = false;
+                        inValueString = false;
+                        modelValueBuf = null;
+                        state = STATE_MODEL_VALUE;
+                        logger.debug("[状态机] pos={} model key 匹配完成，解析 value", i);
+                    }
+                    break;
+                }
+
+                /* ===== 解析 model 的字符串 value ===== */
+                case STATE_MODEL_VALUE: {
+                    if (escapePending) {
+                        escapePending = false;
+                        if (modelValueBuf != null) {
+                            modelValueBuf.append((char) b);
+                        }
+                        break;
+                    }
+                    if (b == '\\') {
+                        escapePending = true;
+                        break;
+                    }
+                    if (b == '"') {
+                        if (!afterColon) {
+                            /* key 的关闭引号 */
+                            break;
+                        }
+                        if (!inValueString) {
+                            /* value 的打开引号 */
+                            inValueString = true;
+                            break;
+                        }
+                        /* value 的关闭引号 —— 提取完成 */
+                        if (modelValueBuf == null) {
+                            modelName = "";
+                        } else {
+                            modelName = modelValueBuf.toString();
+                            modelValueBuf = null;
+                        }
+                        bodyBuffer.setModelFound();
+                        logger.info("[状态机] *** 提取到 model={}", modelName);
+                        state = STATE_DONE;
+                        break;
+                    }
+                    if (b == ':') {
+                        afterColon = true;
+                        break;
+                    }
+                    if (isWhitespace(b)) {
+                        break;
+                    }
+                    /* value 字符 */
+                    if (modelValueBuf == null) {
+                        modelValueBuf = new StringBuilder(32);
+                    }
+                    modelValueBuf.append((char) b);
+                    break;
                 }
             }
-        }
-        if (!this.stream) {
-            Matcher m = STREAM_PATTERN.matcher(chunkStr);
-            if (m.find()) {
-                this.stream = "true".equals(m.group(1));
+
+            if (prevState != state) {
+                logger.debug("[状态机] {} -> {}", stateName(prevState), stateName(state));
             }
         }
+    }
+
+    static String stateName(int s) {
+        return switch (s) {
+            case STATE_NORMAL -> "NORMAL";
+            case STATE_KEY_MODEL -> "KEY_MODEL";
+            case STATE_MODEL_VALUE -> "MODEL_VALUE";
+            case STATE_DONE -> "DONE";
+            default -> "UNKNOWN(" + s + ")";
+        };
+    }
+
+    static boolean isWhitespace(byte b) {
+        return b == ' ' || b == '\t' || b == '\n' || b == '\r';
+    }
+
+    /**
+     * 检查 chunk 中从 offset 开始是否完整匹配 key。
+     * chunk 数据不足时返回 false（等下个 chunk 再试）。
+     */
+    static boolean matchesKey(byte[] chunk, int offset, byte[] key) {
+        if (offset + key.length > chunk.length) {
+            return false;
+        }
+        for (int k = 0; k < key.length; k++) {
+            if (chunk[offset + k] != key[k]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -216,21 +353,15 @@ public class StreamingForwarder {
 
     public static class TransformResult {
         private final String modelName;
-        private final boolean stream;
         private final String nodeId;
 
-        public TransformResult(String modelName, boolean stream, String nodeId) {
+        public TransformResult(String modelName, String nodeId) {
             this.modelName = modelName;
-            this.stream = stream;
             this.nodeId = nodeId;
         }
 
         public String getModelName() {
             return modelName;
-        }
-
-        public boolean isStream() {
-            return stream;
         }
 
         public String getNodeId() {
