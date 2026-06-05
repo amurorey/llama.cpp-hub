@@ -88,7 +88,6 @@ public class AnthropicService {
 	private static final javax.net.ssl.HostnameVerifier TRUST_ALL_HOSTNAME_VERIFIER = (hostname, session) -> true;
 
 	private static final Pattern MODEL_PATTERN = Pattern.compile("\"model\"\\s*:\\s*\"([^\"]+)\"");
-	private static final Pattern STREAM_PATTERN = Pattern.compile("\"stream\"\\s*:\\s*(true|false)");
 
 	public AnthropicService() {
 		
@@ -257,18 +256,14 @@ public class AnthropicService {
             }
         }
         
-        Integer port = manager.getModelPort(modelName);
+       Integer port = manager.getModelPort(modelName);
         if (port == null) {
             this.sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "Model port not found for " + modelName);
             return;
         }
 
-        boolean isStream = false;
-        if (anthropicReq.has("stream") && anthropicReq.get("stream").isJsonPrimitive()) {
-            isStream = anthropicReq.get("stream").getAsBoolean();
-        }
         // 开始转发
-        this.forwardRequestToLlamaCpp(ctx, request, content, port, "/v1/complete", isStream, modelName);
+        this.forwardRequestToLlamaCpp(ctx, request, content, port, "/v1/complete", modelName);
     }
     
     /**
@@ -280,17 +275,6 @@ public class AnthropicService {
         Matcher m = MODEL_PATTERN.matcher(content.substring(0, limit));
         if (m.find()) return m.group(1);
         return null;
-    }
-
-    /**
-     * 从 body 中通过正则提取 stream 字段
-     */
-    private boolean extractStreamFromBody(String content) {
-        if (content == null || content.isEmpty()) return false;
-        int limit = Math.min(content.length(), 1024);
-        Matcher m = STREAM_PATTERN.matcher(content.substring(0, limit));
-        if (m.find()) return "true".equals(m.group(1));
-        return false;
     }
 
     /**
@@ -318,11 +302,10 @@ public class AnthropicService {
      * @param bodyBytes 原始请求 body 字节
      * @param targetUrl 目标 URL（/v1/messages）
      * @param apiKey 目标 API Key（可为 null）
-     * @param isStream 是否流式
      * @param modelName 模型名称
      * @param injection 注入字符串（可为 null，远程转发时不注入）
      */
-    private void forwardRawBody(ChannelHandlerContext ctx, byte[] bodyBytes, String targetUrl, String apiKey, boolean isStream, String modelName, String injection) {
+    private void forwardRawBody(ChannelHandlerContext ctx, byte[] bodyBytes, String targetUrl, String apiKey, String modelName, String injection) {
         worker.execute(() -> {
             HttpURLConnection connection = null;
             String requestId = null;
@@ -357,6 +340,9 @@ public class AnthropicService {
 
                 int responseCode = connection.getResponseCode();
                 ModelRequestTracker.getInstance().updatePhase(requestId, Phase.GENERATION);
+                String contentType = connection.getContentType();
+                boolean isStream = contentType != null && contentType.contains("text/event-stream");
+                logger.debug("[Anthropic响应路由] contentType={}, isStream={}", contentType, isStream);
                 if (isStream) {
                     this.handleStreamResponse(ctx, connection, responseCode, requestId, modelName);
                 } else {
@@ -411,13 +397,12 @@ public class AnthropicService {
             }
         }
 
-        boolean isStream = extractStreamFromBody(content);
         String nodeId = request.headers().get("X-Node-Id");
         byte[] bodyBytes = content.getBytes(StandardCharsets.UTF_8);
         LlamaServerManager manager = LlamaServerManager.getInstance();
 
-        if (nodeId != null && !nodeId.isBlank()) {
-            this.routeMessagesToNode(ctx, bodyBytes, nodeId, isStream, modelName, null);
+         if (nodeId != null && !nodeId.isBlank()) {
+            this.routeMessagesToNode(ctx, bodyBytes, nodeId, modelName, null);
             return;
         }
 
@@ -427,7 +412,7 @@ public class AnthropicService {
                 modelName = resolved;
             }
         }
-        if (manager.getLoadedProcesses().containsKey(modelName)) {
+      if (manager.getLoadedProcesses().containsKey(modelName)) {
             Integer port = manager.getModelPort(modelName);
             if (port == null) {
                 this.sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "Model port not found for " + modelName);
@@ -435,7 +420,7 @@ public class AnthropicService {
             }
             String targetUrl = String.format("http://localhost:%d/v1/messages", port.intValue());
             String injection = SamplingInjectionBuilder.buildInjectionString(modelName);
-            this.forwardRawBody(ctx, bodyBytes, targetUrl, null, isStream, modelName, injection);
+            this.forwardRawBody(ctx, bodyBytes, targetUrl, null, modelName, injection);
             return;
         }
 
@@ -445,14 +430,14 @@ public class AnthropicService {
             if (port != null) {
                 String targetUrl = String.format("http://localhost:%d/v1/messages", port.intValue());
                 String injection = SamplingInjectionBuilder.buildInjectionString(modelName);
-                this.forwardRawBody(ctx, bodyBytes, targetUrl, null, isStream, modelName, injection);
+                this.forwardRawBody(ctx, bodyBytes, targetUrl, null, modelName, injection);
                 return;
             }
         }
 
         String[] remoteResult = resolveModelOnRemoteNodes(modelName);
         if (remoteResult != null) {
-            this.forwardRawBody(ctx, bodyBytes, remoteResult[0], remoteResult[1], isStream, modelName, null);
+            this.forwardRawBody(ctx, bodyBytes, remoteResult[0], remoteResult[1], modelName, null);
             return;
         }
 
@@ -519,20 +504,20 @@ public class AnthropicService {
             return;
         }
 
-        forwardRequestToLlamaCpp(ctx, request, content, port, "/v1/messages/count_tokens", false, modelName);
+        forwardRequestToLlamaCpp(ctx, request, content, port, "/v1/messages/count_tokens", modelName);
     }
     
     
     /**
-     * 	转发操作。
+     *  转发操作。
      * @param ctx
      * @param request
      * @param requestBody
      * @param port
      * @param endpoint
-     * @param isStream
+     * @param modelName
      */
-    private void forwardRequestToLlamaCpp(ChannelHandlerContext ctx, FullHttpRequest request, String requestBody, int port, String endpoint, boolean isStream, String modelName) {
+    private void forwardRequestToLlamaCpp(ChannelHandlerContext ctx, FullHttpRequest request, String requestBody, int port, String endpoint, String modelName) {
         HttpMethod method = request.method();
         Map<String, String> headers = new HashMap<>();
         for (Map.Entry<String, String> entry : request.headers()) {
@@ -580,6 +565,9 @@ public class AnthropicService {
                 int responseCode = connection.getResponseCode();
                 if (requestId != null) ModelRequestTracker.getInstance().updatePhase(requestId, Phase.GENERATION);
 
+                String contentType = connection.getContentType();
+                boolean isStream = contentType != null && contentType.contains("text/event-stream");
+                logger.debug("[Anthropic响应路由] contentType={}, isStream={}", contentType, isStream);
                 if (isStream) {
                 	logger.info("llama.cpp进程响应码: {}，，等待时间：{}", responseCode, System.currentTimeMillis() - t);
                 	this.handleStreamResponse(ctx, connection, responseCode, requestId, modelName);
@@ -603,7 +591,7 @@ public class AnthropicService {
         });
     }
 
-    private void routeMessagesToNode(ChannelHandlerContext ctx, byte[] bodyBytes, String nodeId, boolean isStream, String modelName, String apiKey) {
+    private void routeMessagesToNode(ChannelHandlerContext ctx, byte[] bodyBytes, String nodeId, String modelName, String apiKey) {
         NodeManager nodeManager = NodeManager.getInstance();
         LlamaHubNode node = nodeManager.getNode(nodeId);
         if (node == null || !node.isEnabled()) {
@@ -614,7 +602,7 @@ public class AnthropicService {
         if (apiKey == null) {
             apiKey = node.getApiKey();
         }
-        this.forwardRawBody(ctx, bodyBytes, targetUrl, apiKey, isStream, modelName, null);
+        this.forwardRawBody(ctx, bodyBytes, targetUrl, apiKey, modelName, null);
     }
 
     private String[] resolveModelOnRemoteNodes(String modelName) {
