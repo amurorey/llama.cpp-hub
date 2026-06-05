@@ -2,6 +2,7 @@ package org.mark.llamacpp.server.service;
 
 import java.util.Map;
 
+import org.mark.llamacpp.server.LlamaServerManager;
 import org.mark.llamacpp.server.tools.JsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,18 +17,39 @@ public class SamplingInjectionBuilder {
     private SamplingInjectionBuilder() {
     }
 
+    /**
+     * 将请求中的模型名称解析为实际模型ID。
+     * 当客户端使用模型别名发起请求时，需要解析为实际模型ID才能匹配采样配置。
+     */
+    static String resolveModelName(String modelName) {
+        if (modelName == null || modelName.isBlank()) {
+            return modelName;
+        }
+        try {
+            String resolved = LlamaServerManager.getInstance().findModelIdByAlias(modelName);
+            if (resolved != null) {
+                logger.info("[别名解析] {} -> {}", modelName, resolved);
+                return resolved;
+            }
+        } catch (Exception e) {
+            logger.debug("[别名解析] 解析失败, 使用原名: {}", e.getMessage());
+        }
+        return modelName;
+    }
+
     public static String buildInjectionString(String modelName) {
         if (modelName == null || modelName.isBlank()) {
             return "";
         }
+        String resolvedName = resolveModelName(modelName);
         StringBuilder sb = new StringBuilder(256);
-        appendSampling(sb, modelName);
-        appendChatTemplateKwargs(sb, modelName);
+        appendSampling(sb, resolvedName);
+        appendChatTemplateKwargs(sb, resolvedName);
         String result = sb.toString();
         if (result.isEmpty()) {
             return "";
         }
-        logger.info("采样注入字符串 [model={}]: {}", modelName, result);
+        logger.info("采样注入字符串 [model={} resolved={}]: {}", modelName, resolvedName, result);
         return result;
     }
 
