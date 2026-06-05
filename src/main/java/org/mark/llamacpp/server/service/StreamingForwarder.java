@@ -105,14 +105,22 @@ public class StreamingForwarder {
 
     public void complete() {
         closed.compareAndSet(false, true);
-        queue.offer(EOF_MARKER);
+        try {
+            queue.put(EOF_MARKER);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     public void fail(IOException e) {
         failed.compareAndSet(false, true);
         this.failure = e;
         closed.set(true);
-        queue.offer(EOF_MARKER);
+        try {
+            queue.put(EOF_MARKER);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -189,6 +197,9 @@ public class StreamingForwarder {
             int prevState = state;
 
             switch (state) {
+
+                case STATE_DONE:
+                    return;
 
                 /* ===== 主状态：逐字节扫描 JSON 结构 ===== */
                 default:
@@ -277,7 +288,7 @@ public class StreamingForwarder {
                         bodyBuffer.setModelFound();
                         logger.info("[状态机] *** 提取到 model={}", modelName);
                         state = STATE_DONE;
-                        break;
+                        return;
                     }
                     if (b == ':') {
                         afterColon = true;
