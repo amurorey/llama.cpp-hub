@@ -85,6 +85,21 @@ public class ModelInfoController implements BaseController {
 			this.handleModelConfigDeleteRequest(ctx, request);
 			return true;
 		}
+		// 设置共享配置
+		if (uri.startsWith("/api/models/config/shared/set")) {
+			this.handleModelConfigSharedSetRequest(ctx, request);
+			return true;
+		}
+		// 获取全部共享配置
+		if (uri.startsWith("/api/models/config/shared/get")) {
+			this.handleModelConfigSharedGetRequest(ctx, request);
+			return true;
+		}
+		// 删除共享配置
+		if (uri.startsWith("/api/models/config/shared/delete")) {
+			this.handleModelConfigSharedDeleteRequest(ctx, request);
+			return true;
+		}
 		// 获取指定模型详情的API
 		if (uri.startsWith("/api/models/details")) {
 			this.handleModelDetailsRequest(ctx, request);
@@ -696,14 +711,125 @@ public class ModelInfoController implements BaseController {
 			// 关键注释：删除后直接返回规范化配置包，前端可立即刷新下拉与当前配置
 			Map<String, Object> bundle = configManager.getModelLaunchConfigBundle(modelId);
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(bundle));
-		} catch (Exception e) {
-			logger.info("删除模型启动配置时发生错误", e);
-			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("删除模型启动配置失败: " + e.getMessage()));
-		}
-	}
-	
-	/**
-	 * 处理器模型详情的请求
+      } catch (Exception e) {
+            logger.info("删除模型启动配置时发生错误", e);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.error("删除模型启动配置失败: " + e.getMessage()));
+        }
+    }
+
+    private void handleModelConfigSharedSetRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+        this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
+        try {
+            String content = request.content().toString(CharsetUtil.UTF_8);
+            if (content == null || content.trim().isEmpty()) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
+                return;
+            }
+            JsonObject obj = JsonUtil.fromJson(content, JsonObject.class);
+            if (obj == null) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体解析失败"));
+                return;
+            }
+            String nodeId = JsonUtil.getJsonString(obj, "nodeId", "");
+            if (nodeId != null && !nodeId.isBlank()) {
+                logger.info("[模型信息] 远程代理设置共享配置: nodeId={}, modelId={}", nodeId, JsonUtil.getJsonString(obj, "modelId", ""));
+                this.proxyPostRemote(ctx, request, nodeId, "api/models/config/shared/set");
+                return;
+            }
+            String modelId = JsonUtil.getJsonString(obj, "modelId", null);
+            if (modelId == null || modelId.trim().isEmpty()) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需的modelId参数"));
+                return;
+            }
+            String configName = JsonUtil.getJsonString(obj, "configName", null);
+            if (configName == null || configName.trim().isEmpty()) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需的configName参数"));
+                return;
+            }
+            String sharedName = JsonUtil.getJsonString(obj, "sharedName", null);
+            if (sharedName == null || sharedName.trim().isEmpty()) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需的sharedName参数"));
+                return;
+            }
+            ConfigManager configManager = ConfigManager.getInstance();
+            Map<String, Object> result = configManager.shareLaunchConfig(modelId, configName, sharedName);
+            boolean success = Boolean.TRUE.equals(result.get("success"));
+            if (!success) {
+                String errorMsg = (String) result.getOrDefault("error", "共享配置失败");
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error(errorMsg));
+                return;
+            }
+            Map<String, Object> data = new HashMap<>();
+            data.put("sharedName", sharedName);
+            data.put("source", modelId);
+            data.put("sourceConfigName", configName);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
+        } catch (Exception e) {
+            logger.info("设置共享配置时发生错误", e);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.error("设置共享配置失败: " + e.getMessage()));
+        }
+    }
+
+    private void handleModelConfigSharedGetRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+        this.assertRequestMethod(request.method() != HttpMethod.GET, "只支持GET请求");
+        try {
+            Map<String, String> params = ParamTool.getQueryParam(request.uri());
+            String nodeId = params.get("nodeId");
+            if (nodeId != null && !nodeId.isBlank()) {
+                logger.info("[模型信息] 远程代理获取共享配置: nodeId={}", nodeId);
+                this.proxyGetRemote(ctx, request, nodeId, "api/models/config/shared/get");
+                return;
+            }
+            ConfigManager configManager = ConfigManager.getInstance();
+            Map<String, Object> shared = configManager.getAllSharedConfigs();
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.success(shared));
+        } catch (Exception e) {
+            logger.info("获取共享配置时发生错误", e);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.error("获取共享配置失败: " + e.getMessage()));
+        }
+    }
+
+    private void handleModelConfigSharedDeleteRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+        this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
+        try {
+            String content = request.content().toString(CharsetUtil.UTF_8);
+            if (content == null || content.trim().isEmpty()) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
+                return;
+            }
+            JsonObject obj = JsonUtil.fromJson(content, JsonObject.class);
+            if (obj == null) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体解析失败"));
+                return;
+            }
+            String nodeId = JsonUtil.getJsonString(obj, "nodeId", "");
+            if (nodeId != null && !nodeId.isBlank()) {
+                logger.info("[模型信息] 远程代理删除共享配置: nodeId={}, sharedName={}", nodeId, JsonUtil.getJsonString(obj, "sharedName", ""));
+                this.proxyPostRemote(ctx, request, nodeId, "api/models/config/shared/delete");
+                return;
+            }
+            String sharedName = JsonUtil.getJsonString(obj, "sharedName", null);
+            if (sharedName == null || sharedName.trim().isEmpty()) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少必需的sharedName参数"));
+                return;
+            }
+            ConfigManager configManager = ConfigManager.getInstance();
+            boolean ok = configManager.unshareLaunchConfig(sharedName);
+            if (!ok) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("取消共享失败，共享配置不存在"));
+                return;
+            }
+            Map<String, Object> data = new HashMap<>();
+            data.put("sharedName", sharedName);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
+        } catch (Exception e) {
+            logger.info("删除共享配置时发生错误", e);
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.error("删除共享配置失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 处理器模型详情的请求
 	 * 
 	 * @param ctx
 	 * @param request
