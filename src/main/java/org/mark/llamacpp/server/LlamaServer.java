@@ -107,9 +107,14 @@ public class LlamaServer {
 		
 		RuntimeMXBean runtimeMxBean = ManagementFactory.getRuntimeMXBean();
         List<String> arguments = runtimeMxBean.getInputArguments();
-        for (String arg : arguments) {
-        	logger.info("JVM argument: " + arg);
-        }
+		for (String arg : arguments) {
+			logger.info("JVM argument: " + arg);
+		}
+		// 记录PID
+		LlamaServer.PID = runtimeMxBean.getName().split("@")[0];
+		
+		logger.info("Process PID: " + LlamaServer.PID);
+
 		// 这里重定向输出流
 		try {
 			Files.createDirectories(LOG_DIR);
@@ -478,6 +483,8 @@ public class LlamaServer {
     public static final PrintStream out = System.out;
     
     public static final PrintStream err = System.err;
+    
+    public static String PID = "0";
 
     //##############################################################################################################################
     
