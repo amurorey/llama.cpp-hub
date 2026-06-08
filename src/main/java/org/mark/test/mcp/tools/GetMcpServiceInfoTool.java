@@ -3,6 +3,7 @@ package org.mark.test.mcp.tools;
 import java.util.Map;
 
 import org.mark.llamacpp.server.service.ComputerService;
+import org.mark.llamacpp.server.tools.FastFetchHelper;
 import org.mark.test.mcp.IMCPTool;
 import org.mark.test.mcp.struct.McpMessage;
 import org.mark.test.mcp.struct.McpToolInputSchema;
@@ -61,7 +62,7 @@ public class GetMcpServiceInfoTool implements IMCPTool {
 		long jvmFreeMemoryMb = ComputerService.getJvmFreeMemoryMB();
 		long jvmUsedMemoryMb = ComputerService.getJvmUsedMemoryMB();
 		int jvmAvailableProcessors = ComputerService.getJvmAvailableProcessors();
-
+ 
 		StringBuilder info = new StringBuilder();
 		info.append("服务信息如下：\n");
 		info.append("CPU Model: ").append(cpuModel).append("\n");
@@ -80,6 +81,28 @@ public class GetMcpServiceInfoTool implements IMCPTool {
 		info.append("JVM Free Memory MB: ").append(jvmFreeMemoryMb).append("\n");
 		info.append("JVM Used Memory MB: ").append(jvmUsedMemoryMb).append("\n");
 		info.append("JVM Available Processors: ").append(jvmAvailableProcessors);
+
+		FastFetchHelper.ComputerInfo ffInfo = FastFetchHelper.getInstance().getInfo();
+		if (!ffInfo.hasError()) {
+			info.append("\n\n--- 详细硬件信息 (FastFetch) ---\n");
+			info.append("CPU 温度: ").append(ffInfo.getCpuTemperature()).append("°C\n");
+			info.append("物理核心: ").append(ffInfo.getPhysicalCores()).append(", 逻辑核心: ").append(ffInfo.getLogicalCores()).append("\n");
+
+			for (FastFetchHelper.GpuInfo gpu : ffInfo.getGpus()) {
+				info.append("GPU [").append(gpu.getIndex()).append("]: ")
+						.append(gpu.getVendor()).append(" ").append(gpu.getName())
+						.append(" (Driver: ").append(gpu.getDriver()).append(", Temp: ").append(gpu.getTemperature()).append("°C)\n");
+				info.append("  - 显存: Dedicated ").append(gpu.getDedicatedMemoryBytes() > 0 ? gpu.getDedicatedMemoryBytes() / 1024 / 1024 + "MB" : "未知")
+						.append(", Shared ").append(gpu.getSharedMemoryBytes() > 0 ? gpu.getSharedMemoryBytes() / 1024 / 1024 + "MB" : "未知").append("\n");
+			}
+
+			for (FastFetchHelper.BatteryInfo bat : ffInfo.getBatteries()) {
+				info.append("电池 [").append(bat.getName()).append("]: 温度 ").append(bat.getTemperature()).append("°C, 容量 ").append(bat.getCapacity()).append("%\n");
+			}
+		} else {
+			info.append("\n\n(FastFetch 详细硬件信息获取失败: ").append(ffInfo.getError()).append(")");
+		}
+
 		return new McpMessage().addText(info.toString());
 	}
 }
