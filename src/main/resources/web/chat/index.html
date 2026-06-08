@@ -5053,7 +5053,9 @@
         model: bareModelId,
         messages,
         stream: !!assistant?.stream,
-        enable_thinking: thinkingLevel !== 'off'
+        chat_template_kwargs: {
+          enable_thinking: thinkingLevel !== 'off'
+        }
       };
       if (thinkingLevel !== 'off' && thinkingLevel !== 'unlimited') {
         payload.thinking_budget_tokens = Number(thinkingLevel);
