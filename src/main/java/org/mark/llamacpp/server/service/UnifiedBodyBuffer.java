@@ -1,5 +1,6 @@
 package org.mark.llamacpp.server.service;
 
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -20,7 +21,7 @@ public class UnifiedBodyBuffer {
 	private static final int MEMORY_LIMIT = 4 * 1024 * 1024;
 
 	private ByteArrayOutputStream memoryBuffer = new ByteArrayOutputStream();
-	private FileOutputStream fileOutput;
+	private OutputStream fileOutput;
 	private File spoolFile;
 
 	private long totalBytes = 0;
@@ -74,6 +75,7 @@ public class UnifiedBodyBuffer {
 
 		synchronized (this) {
 			if (this.spoolFile != null) {
+				flushFileOutput();
 				source = Files.newInputStream(this.spoolFile.toPath());
 			} else {
 				byte[] memData = this.memoryBuffer.toByteArray();
@@ -114,10 +116,10 @@ public class UnifiedBodyBuffer {
 
 		synchronized (this) {
 			if (this.spoolFile != null) {
+				flushFileOutput();
 				source = Files.newInputStream(this.spoolFile.toPath());
 			}
 		}
-
 		try {
 			if (source != null) {
 				try {
@@ -163,6 +165,7 @@ public class UnifiedBodyBuffer {
 		byte[] tail;
 		synchronized (this) {
 			if (this.spoolFile != null) {
+				flushFileOutput();
 				long tailLen = Math.min(bodyLen, 1024 * 1024);
 				tail = new byte[(int) tailLen];
 				int toRead = (int) tailLen;
@@ -228,6 +231,7 @@ public class UnifiedBodyBuffer {
 		IOException failure = null;
 		try {
 			if (this.fileOutput != null) {
+				this.fileOutput.flush();
 				this.fileOutput.close();
 				this.fileOutput = null;
 			}
@@ -247,9 +251,15 @@ public class UnifiedBodyBuffer {
 
 	private void spoolToFile() throws IOException {
 		this.spoolFile = File.createTempFile("llama-body-", ".json");
-		this.fileOutput = new FileOutputStream(this.spoolFile);
+		this.fileOutput = new BufferedOutputStream(new FileOutputStream(this.spoolFile), 1024 * 1024);
 		this.memoryBuffer.writeTo(this.fileOutput);
 		this.fileOutput.flush();
 		this.memoryBuffer = new ByteArrayOutputStream();
+	}
+
+	private void flushFileOutput() throws IOException {
+		if (this.fileOutput != null) {
+			this.fileOutput.flush();
+		}
 	}
 }
