@@ -24,6 +24,7 @@ import java.util.concurrent.Executors;
 
 import org.mark.llamacpp.server.LlamaServer;
 import org.mark.llamacpp.server.LlamaServerManager;
+import org.mark.llamacpp.server.NodeManager;
 import org.mark.llamacpp.server.struct.ActiveRequest;
 import org.mark.llamacpp.server.struct.ApiResponse;
 import org.mark.llamacpp.server.struct.CharactorDataStruct;
@@ -181,22 +182,33 @@ public class EasyChatService {
 				}
 			}
 
-			// Resolve model port
-			LlamaServerManager manager = LlamaServerManager.getInstance();
-			if (!manager.getLoadedProcesses().containsKey(modelId)) {
-				String resolved = manager.findModelIdByAlias(modelId);
-				if (resolved != null) {
-					modelId = resolved;
+			// Read X-Node-Id header for remote node routing
+			String nodeId = decodeHeader(request.headers().get("X-Node-Id"));
+			if (nodeId != null) {
+				nodeId = nodeId.trim();
+			}
+			boolean isRemoteNode = nodeId != null && !nodeId.isEmpty();
+			logger.info("[EasyChat][Node路由] X-Node-Id={}, isRemoteNode={}, modelId={}", nodeId, isRemoteNode, modelId);
+
+			// Resolve model port (local only; remote nodes skip this)
+			Integer modelPort = null;
+			if (!isRemoteNode) {
+				LlamaServerManager manager = LlamaServerManager.getInstance();
+				if (!manager.getLoadedProcesses().containsKey(modelId)) {
+					String resolved = manager.findModelIdByAlias(modelId);
+					if (resolved != null) {
+						modelId = resolved;
+					}
 				}
-			}
-			if (!manager.getLoadedProcesses().containsKey(modelId)) {
-				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型未找到: " + modelId));
-				return;
-			}
-			Integer modelPort = manager.getModelPort(modelId);
-			if (modelPort == null) {
-				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型端口未找到: " + modelId));
-				return;
+				if (!manager.getLoadedProcesses().containsKey(modelId)) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型未找到: " + modelId));
+					return;
+				}
+				modelPort = manager.getModelPort(modelId);
+				if (modelPort == null) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型端口未找到: " + modelId));
+					return;
+				}
 			}
 
 			// Resolve system prompt from assistant name
@@ -308,7 +320,9 @@ public class EasyChatService {
 
 			// Create effectively final copies for lambda capture
 			final String finalModelId = modelId;
-			final int finalModelPort = modelPort;
+			final int finalModelPort = modelPort == null ? 0 : modelPort;
+			final String finalNodeId = nodeId;
+			final boolean finalIsRemoteNode = isRemoteNode;
 			final String finalSystemPrompt = systemPrompt;
 			final Path finalConvDir = convDir;
 			final byte[] finalToolsBytes = toolsBytes;
@@ -316,6 +330,7 @@ public class EasyChatService {
 			final boolean finalIsRegenerate = isRegenerate;
 			final Map<Long, Integer> finalVariants = variants;
 			final Long finalRegenerateSeq = regenerateSeq;
+			final byte[] finalBodyBytes = bodyBytes.clone();
 
 			// Dispatch to worker thread
 			worker.execute(() -> {
@@ -323,34 +338,41 @@ public class EasyChatService {
 				StreamAccumulator accumulator = new StreamAccumulator();
 				Path indexPath = finalConvDir.resolve(INDEX_FILE);
 				try {
-					connection = openTrackedConnection(ctx, finalModelId, finalModelPort);
+					if (finalIsRemoteNode) {
+						handleRemoteNodeRequest(ctx, conversationId, finalNodeId, finalModelId,
+							finalSystemPrompt, finalConvDir, finalToolsBytes, finalSamplingParams,
+							finalVariants, finalRegenerateSeq, finalBodyBytes, finalIsRegenerate,
+							aiSeq, accumulator, indexPath);
+					} else {
+						connection = openTrackedConnection(ctx, finalModelId, finalModelPort);
 
-					// Stream request body to llama.cpp
-					writeRequestBody(connection, finalModelId, finalSystemPrompt, finalConvDir,
-						finalToolsBytes, finalSamplingParams, finalVariants, finalRegenerateSeq);
+						// Stream request body to llama.cpp
+						writeRequestBody(connection, finalModelId, finalSystemPrompt, finalConvDir,
+							finalToolsBytes, finalSamplingParams, finalVariants, finalRegenerateSeq);
 
-					int responseCode = connection.getResponseCode();
-					logger.info("[EasyChat] llama.cpp响应码: {} conversation={}", responseCode, conversationId);
+						int responseCode = connection.getResponseCode();
+						logger.info("[EasyChat] llama.cpp响应码: {} conversation={}", responseCode, conversationId);
 
-					if (!(responseCode >= 200 && responseCode < 300)) {
-						String errBody = readErrorBody(connection);
-						logger.info("[EasyChat] llama.cpp错误响应 code={} body={}", responseCode, errBody);
-						sendErrorResponse(ctx, responseCode, errBody);
-						return;
+						if (!(responseCode >= 200 && responseCode < 300)) {
+							String errBody = readErrorBody(connection);
+							logger.info("[EasyChat] llama.cpp错误响应 code={} body={}", responseCode, errBody);
+							sendErrorResponse(ctx, responseCode, errBody);
+							return;
+						}
+
+						// Set up SSE response to client
+						HttpResponse sseResp = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+						sseResp.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream; charset=UTF-8");
+						sseResp.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
+						sseResp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+						sseResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+						sseResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+						ctx.write(sseResp);
+						ctx.flush();
+
+						// Read and proxy SSE stream
+						proxySseStream(ctx, connection, finalModelId, accumulator);
 					}
-
-					// Set up SSE response to client
-					HttpResponse sseResp = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
-					sseResp.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream; charset=UTF-8");
-					sseResp.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
-					sseResp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
-					sseResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-					sseResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
-					ctx.write(sseResp);
-					ctx.flush();
-
-					// Read and proxy SSE stream
-					proxySseStream(ctx, connection, finalModelId, accumulator);
 
 					// Write AI fragment and update state (always, if buffer has content)
 					synchronized (convLock) {
@@ -1612,6 +1634,169 @@ public class EasyChatService {
 		}
 		Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
 		logger.info("[EasyChat] 更新碎片变体成功 seq={} variantIndex={} newLength={}", seq, variantIndex, newPayload.length);
+	}
+
+	/**
+	 * Handle stream-chat request routed to a remote node.
+	 * Builds the request body, forwards to remote node via NodeManager, and proxies the SSE stream back.
+	 */
+	private void handleRemoteNodeRequest(ChannelHandlerContext ctx, String conversationId, String nodeId,
+		String modelId, String systemPrompt, Path convDir, byte[] toolsBytes,
+		JsonObject samplingParams, Map<Long, Integer> variants, Long regenerateSeq,
+		byte[] bodyBytes, boolean isRegenerate, long aiSeq,
+		StreamAccumulator accumulator, Path indexPath) throws Exception {
+
+		logger.info("[EasyChat][Remote] 转发到远程节点: nodeId={}, model={}, conversation={}", nodeId, modelId, conversationId);
+
+		// Build request body as JSON string (same logic as writeRequestBody)
+		StringBuilder sb = new StringBuilder();
+		sb.append("{\"model\":\"").append(escapeJsonString(modelId)).append("\",\"stream\":true,\"timings_per_token\":true,\"return_progress\":true,\"messages\":[\n");
+
+		if (systemPrompt != null && !systemPrompt.isBlank()) {
+			sb.append("{\"role\":\"system\",\"content\":\"").append(escapeJsonString(systemPrompt)).append("\"},\n");
+		}
+
+		// Stream fragment payloads (fragment already contains the new user message)
+		long seq = 0;
+		boolean first = true;
+		while (true) {
+			byte[] payload = readFragmentPayload(convDir, seq);
+			if (payload == null) break;
+
+			// For regenerate: stop before the AI message being regenerated
+			if (regenerateSeq != null && seq == regenerateSeq) {
+				break;
+			}
+
+			// For AI messages, use specified variant if available
+			if (variants != null && variants.containsKey(seq)) {
+				int variantIdx = variants.get(seq);
+				payload = readFragmentPayload(convDir, seq, variantIdx);
+			} else {
+				int activeVariant = readActiveVariantIndex(convDir, seq);
+				if (activeVariant > 0) {
+					payload = readFragmentPayload(convDir, seq, activeVariant);
+				}
+			}
+
+			if (!first) {
+				sb.append(',');
+			}
+			sb.append(new String(payload, StandardCharsets.UTF_8)).append('\n');
+			first = false;
+			seq++;
+		}
+
+		sb.append(']');
+
+		// Tools
+		if (toolsBytes != null && toolsBytes.length > 0) {
+			JsonObject toolsObj = JsonUtil.tryParseObject(new String(toolsBytes, StandardCharsets.UTF_8));
+			if (toolsObj != null) {
+				for (String key : toolsObj.keySet()) {
+					sb.append(',').append('"').append(key).append('"').append(':').append(JsonUtil.toJson(toolsObj.get(key)));
+				}
+			}
+		}
+
+		// Sampling params
+		if (samplingParams != null) {
+			JsonObject tempReq = new JsonObject();
+			tempReq.addProperty("model", modelId);
+			tempReq.add("samplingParams", samplingParams);
+			ModelSamplingService.getInstance().handleOpenAI(tempReq);
+			for (String key : tempReq.keySet()) {
+				if ("model".equals(key) || "stream".equals(key) || "messages".equals(key) || "samplingParams".equals(key)) {
+					continue;
+				}
+				sb.append(',').append('"').append(key).append('"').append(':').append(JsonUtil.toJson(tempReq.get(key)));
+			}
+		}
+
+		sb.append('}');
+		String requestBodyStr = sb.toString();
+		logger.info("[EasyChat][Remote] 请求体 ({} chars):\n{}", requestBodyStr.length(), requestBodyStr);
+
+		// Parse request body to JsonObject for NodeManager
+		JsonObject requestBody = JsonUtil.fromJson(requestBodyStr, JsonObject.class);
+		if (requestBody == null) {
+			throw new IllegalStateException("Failed to parse request body for remote node");
+		}
+
+		// Forward to remote node
+		NodeManager nodeManager = NodeManager.getInstance();
+		NodeManager.StreamResult streamResult = nodeManager.callRemoteApiStreaming(
+			nodeId, "POST", "v1/chat/completions", requestBody, null, 60000);
+
+		int responseCode = streamResult.getStatusCode();
+		logger.info("[EasyChat][Remote] 远程节点响应码: {} conversation={}", responseCode, conversationId);
+
+		if (!(responseCode >= 200 && responseCode < 300)) {
+			String errBody;
+			try {
+				errBody = new String(streamResult.getBody().readAllBytes(), StandardCharsets.UTF_8);
+			} catch (Exception e) {
+				errBody = "Remote node error: " + responseCode;
+			}
+			logger.info("[EasyChat][Remote] 远程节点错误响应 code={} body={}", responseCode, errBody);
+			sendErrorResponse(ctx, responseCode, errBody);
+			return;
+		}
+
+		// Set up SSE response to client
+		HttpResponse sseResp = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
+		sseResp.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream; charset=UTF-8");
+		sseResp.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
+		sseResp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+		sseResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+		sseResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+		ctx.write(sseResp);
+		ctx.flush();
+
+		// Proxy SSE stream from remote node to client
+		proxySseStreamFromRemote(ctx, streamResult.getBody(), accumulator);
+
+		logger.info("[EasyChat][Remote] 远程节点流式响应完成: nodeId={}, conversation={}", nodeId, conversationId);
+	}
+
+	/**
+	 * Proxy SSE stream from a remote node's InputStream to the client.
+	 */
+	private void proxySseStreamFromRemote(ChannelHandlerContext ctx, java.io.InputStream inputStream,
+		StreamAccumulator accumulator) throws IOException {
+
+		Map<Integer, String> toolCallIds = new HashMap<>();
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+			String line;
+			while ((line = reader.readLine()) != null) {
+				if (!ctx.channel().isActive() || !ctx.channel().isWritable()) {
+					logger.info("[EasyChat][Remote] 客户端断开，中止流式代理");
+					return;
+				}
+
+				if (!line.startsWith("data: ")) {
+					writeSseLine(ctx, line);
+					continue;
+				}
+
+				String data = line.substring(6);
+				if ("[DONE]".equals(data)) {
+					logger.info("[EasyChat][Remote] 流式响应结束");
+					writeSseLine(ctx, line);
+					return;
+				}
+
+				JsonObject json = JsonUtil.tryParseObject(data);
+				if (json != null) {
+					accumulateDelta(json, accumulator, toolCallIds);
+					if (json.has("timings")) {
+						accumulator.timings = json.getAsJsonObject("timings");
+					}
+				}
+
+				writeSseLine(ctx, line);
+			}
+		}
 	}
 
 	/**
