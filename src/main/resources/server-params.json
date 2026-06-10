@@ -667,6 +667,24 @@
     "groupCollapsed": true
   },
   {
+    "name": "param.server.reasoning.name",
+    "fullName": "--reasoning",
+    "abbreviation": "-rea",
+    "type": "STRING",
+    "defaultValue": "auto",
+    "description": "param.server.reasoning.desc",
+    "values": [
+      "on",
+      "off",
+      "auto"
+    ],
+    "sort": 29.5,
+    "defaultEnabled": false,
+    "group": "page.params.group.template",
+    "groupOrder": 50,
+    "groupCollapsed": true
+  },
+  {
     "name": "param.server.reasoning_format.name",
     "fullName": "--reasoning-format",
     "abbreviation": "--reasoning-format",

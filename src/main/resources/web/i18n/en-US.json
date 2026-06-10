@@ -806,6 +806,8 @@
   "modal.json_editor.edit": "Edit JSON",
   "modal.json_editor.placeholder": "[JSON] Click the button to edit",
   "modal.json_editor.error_format": "format error",
+  "param.server.reasoning.name": "Reasoning",
+  "param.server.reasoning.desc": "--reasoning: Use reasoning/thinking in the chat (on, off, or auto; default: auto, detect from template).",
   "param.server.reasoning_format.name": "Reasoning Format",
   "param.server.reasoning_format.desc": "--reasoning-format: controls whether thought tags are allowed and/or extracted from the response, and in which format they're returned; one of: - none: leaves thoughts unparsed in message.content; - deepseek: puts thoughts in message.reasoning_content; - deepseek-legacy: keeps <think> tags in message.content while also populating message.reasoning_content(default: auto)",
   "param.server.reasoning_budget.name": "Reasoning Budget",

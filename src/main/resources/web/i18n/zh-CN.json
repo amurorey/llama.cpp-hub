@@ -806,6 +806,8 @@
   "modal.json_editor.edit": "编辑 JSON",
   "modal.json_editor.placeholder": "[JSON] 点击右侧按钮编辑",
   "modal.json_editor.error_format": "格式错误",
+  "param.server.reasoning.name": "推理模式",
+  "param.server.reasoning.desc": "--reasoning：在对话中使用推理/思考（on, off, 或 auto，默认：auto，从模板自动检测）。",
   "param.server.reasoning_format.name": "推理格式",
   "param.server.reasoning_format.desc": "--reasoning-format：控制是否允许及/或从响应中提取思考标签，以及它们的返回格式；可选值：none: 在 message.content 中保留未解析的思考内容； deepseek：将思考内容放入 message.reasoning_content； deepseek-legacy：在 message.content 中保留<think>标签，同时填充 message.reasoning_content（默认：auto）",
   "param.server.reasoning_budget.name": "强制推理",
