@@ -354,8 +354,16 @@ public class LlamaServer {
 	 * 	
 	 * @return
 	 */
-	public static String getCreatedTime() {
+   public static String getCreatedTime() {
 		return BuildInfo.getCreatedTime();
+	}
+
+	/**
+	 *
+	 * @return
+	 */
+	public static String getPID() {
+		return PID;
 	}
 	
 	

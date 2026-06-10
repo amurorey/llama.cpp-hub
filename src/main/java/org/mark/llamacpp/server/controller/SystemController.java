@@ -121,9 +121,14 @@ public class SystemController implements BaseController {
 			this.handleCompatStatusRequest(ctx, request);
 			return true;
 		}
-		// 获取构建版本信息
+     // 获取构建版本信息
 		if (uri.startsWith("/api/sys/version")) {
 			this.handleVersionInfoRequest(ctx, request);
+			return true;
+		}
+		// 获取进程PID
+		if (uri.startsWith("/api/sys/pid")) {
+			this.handlePidRequest(ctx, request);
 			return true;
 		}
 		// 获取GPU服务信息（初始化快照）
@@ -658,7 +663,7 @@ public class SystemController implements BaseController {
 		}
 	}
 
-	private void handleVersionInfoRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+    private void handleVersionInfoRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
 		if (request.method() == HttpMethod.OPTIONS) {
 			LlamaServer.sendCorsResponse(ctx);
 			return;
@@ -673,6 +678,28 @@ public class SystemController implements BaseController {
 		} catch (Exception e) {
 			logger.info("获取版本信息时发生错误", e);
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("获取版本信息失败: " + e.getMessage()));
+		}
+	}
+
+	/**
+	 * 获取进程PID
+	 * @param ctx
+	 * @param request
+	 * @throws RequestMethodException
+	 */
+	private void handlePidRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
+		if (request.method() == HttpMethod.OPTIONS) {
+			LlamaServer.sendCorsResponse(ctx);
+			return;
+		}
+		this.assertRequestMethod(request.method() != HttpMethod.GET, "只支持GET请求");
+		try {
+			Map<String, Object> data = new HashMap<>();
+			data.put("pid", LlamaServer.getPID());
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
+		} catch (Exception e) {
+			logger.info("获取PID时发生错误", e);
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("获取PID失败: " + e.getMessage()));
 		}
 	}
 	
