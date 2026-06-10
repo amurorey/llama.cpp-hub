@@ -520,6 +520,7 @@
     const EASY_CHAT_DELETE_ENDPOINT = '/api/chat/delete';
     const EASY_CHAT_MESSAGE_UPDATE_ENDPOINT = '/api/chat/message/update';
     const STATE_REVISION_CONFLICT_CODE = 'STATE_REVISION_CONFLICT';
+    const STATE_REVISION_TIMEOUT_MS = 2000;
     const STATE_LOAD_TIMEOUT_MS = 30000;
     const STATE_SAVE_TIMEOUT_MS = 20000;
     const MAX_IMAGE_COUNT = 6;
@@ -3313,7 +3314,7 @@
       try {
         const json = await fetchJson(EASY_CHAT_STATE_REVISION_ENDPOINT, {
           headers: getHeaders(),
-          timeoutMs: STATE_LOAD_TIMEOUT_MS
+          timeoutMs: STATE_REVISION_TIMEOUT_MS
         });
         if (!json?.success) {
           throw new Error(json?.error || window.I18N.t('page.chat.main.error.revision_check_failed', '状态校验失败'));
