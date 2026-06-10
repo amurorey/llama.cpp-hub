@@ -464,6 +464,7 @@ public class GGUFMetaData {
 		case 38 -> "MXFP4";
 		case 39 -> "NVFP4";
 		case 76 -> "MXFP4";
+		case 105 -> "ROCmFP4";
 		default -> "UNKNOWN(" + fileType + ")";
 		};
 	}

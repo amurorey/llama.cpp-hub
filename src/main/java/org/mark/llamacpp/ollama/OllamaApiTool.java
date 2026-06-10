@@ -854,6 +854,7 @@ public final class OllamaApiTool {
 		case 28 -> "F64";
 		case 29 -> "IQ1_M";
 		case 30 -> "BF16";
+		case 105 -> "ROCmFP4";
 		default -> "UNKNOWN(" + id + ")";
 		};
 	}
