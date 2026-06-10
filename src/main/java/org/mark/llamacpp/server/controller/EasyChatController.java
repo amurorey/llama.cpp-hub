@@ -57,15 +57,21 @@ public class EasyChatController implements BaseController {
 	private static final String STATE_REVISION_KEY = "_revision";
 	private static final String BASE_REVISION_FIELD = "baseRevision";
 	private static final String REVISION_CONFLICT_CODE = "STATE_REVISION_CONFLICT";
-
-	private static final String PATH_STREAM_CHAT = "/api/easy-chat/stream-chat";
+	
+	/**
+	 * 	这个用来获取历史对话，或者提交请求。
+	 */
+	private static final String PATH_STREAM_CHAT = "/api/chat/stream-chat";
+	private static final String PATH_DELETE = "/api/chat/delete";
+	private static final String PATH_MESSAGE_UPDATE = "/api/chat/message/update";
+	
+	
 	private static final String PATH_STATE = "/api/easy-chat/state";
 	private static final String PATH_STATE_REVISION = "/api/easy-chat/state/revision";
 	private static final String PATH_CONVERSATION_SAVE = "/api/easy-chat/conversation/save";
 	private static final String PATH_CONVERSATION = "/api/easy-chat/conversation";
 	private static final String PATH_SYNC = "/api/easy-chat/sync";
-	private static final String PATH_DELETE = "/api/easy-chat/delete";
-	private static final String PATH_MESSAGE_UPDATE = "/api/easy-chat/message/update";
+	
 
 	@Override
 	public boolean handleRequest(String uri, ChannelHandlerContext ctx, FullHttpRequest request)

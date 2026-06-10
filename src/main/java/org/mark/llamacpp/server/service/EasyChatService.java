@@ -4,17 +4,12 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URLDecoder;
-import java.nio.ByteOrder;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +22,6 @@ import org.mark.llamacpp.server.LlamaServerManager;
 import org.mark.llamacpp.server.NodeManager;
 import org.mark.llamacpp.server.struct.ActiveRequest;
 import org.mark.llamacpp.server.struct.ApiResponse;
-import org.mark.llamacpp.server.struct.CharactorDataStruct;
 import org.mark.llamacpp.server.struct.Timing;
 import org.mark.llamacpp.server.tools.JsonUtil;
 import org.slf4j.Logger;
@@ -69,32 +63,10 @@ public class EasyChatService {
 	}
 
 	private final ExecutorService worker = Executors.newVirtualThreadPerTaskExecutor();
-	private final Map<ChannelHandlerContext, HttpURLConnection> channelConnectionMap = new HashMap<>();
+	private final Map<ChannelHandlerContext, TrackedConnection> channelConnectionMap = new ConcurrentHashMap<>();
 	private final Map<String, Object> conversationLocks = new ConcurrentHashMap<>();
-
-	// Index file constants
-	private static final int IDX_HEADER = 16;
-	private static final int IDX_CONV_NAME_LEN = 4;
-	private static final int IDX_CONV_NAME = 4096;
-	private static final int IDX_START_TIME = 8;
-	private static final int IDX_ASSISTANT_NAME_LEN = 4;
-	private static final int IDX_ASSISTANT_NAME = 4096;
-	private static final int IDX_SEQ = 8;
-	private static final int INDEX_FILE_SIZE = IDX_HEADER + IDX_CONV_NAME_LEN + IDX_CONV_NAME + IDX_START_TIME + IDX_ASSISTANT_NAME_LEN + IDX_ASSISTANT_NAME + IDX_SEQ;
-
-	// Fragment file constants
-	private static final int FRAG_HEADER_SIZE = 160;
-	private static final int FRAG_PAYLOAD_OFFSET = 160;
-	private static final int FRAG_COUNT_OFFSET = 32;
-	private static final int FRAG_ACTIVE_VARIANT_OFFSET = 34;
-	private static final int FRAG_LENGTHS_OFFSET = 36;
-	private static final int FRAG_MAX_VARIANTS = 10;
-	private static final int FRAG_LENGTH_ENTRY = 4;
-	private static final int FRAG_LENGTHS = FRAG_MAX_VARIANTS * FRAG_LENGTH_ENTRY;
-
-	private static final String FRAG_NAME_FMT = "%016d.bin";
-	private static final String INDEX_FILE = "index.bin";
-	private static final String TOOLS_FILE = "tools.bin";
+	private final EasyChatStorage storage = new EasyChatStorage();
+	private final EasyChatRequestWriter requestWriter = new EasyChatRequestWriter(storage);
 
 	private EasyChatService() {
 	}
@@ -211,14 +183,8 @@ public class EasyChatService {
 				}
 			}
 
-			// Resolve system prompt from assistant name
-			String systemPrompt = null;
-			if (!assistantName.isBlank()) {
-				CharactorDataStruct charactor = findCharactorByTitle(assistantName);
-				if (charactor != null && charactor.getSystemPrompt() != null && !charactor.getSystemPrompt().isBlank()) {
-					systemPrompt = charactor.getSystemPrompt();
-				}
-			}
+			// Resolve system prompt from synced assistant config.
+			String systemPrompt = resolveAssistantSystemPrompt(assistantName);
 
 			// Parse regenerate headers
 			Long regenerateSeq = null;
@@ -261,26 +227,16 @@ public class EasyChatService {
 			// Per-conversation lock
 			Object convLock = conversationLocks.computeIfAbsent(conversationId, k -> new Object());
 
-			Path fragmentsBase = getFragmentsDir();
-			Path convDir = convDir(fragmentsBase, conversationId);
+			Path convDir = storage.getConversationDir(conversationId);
 
 			long userSeq;
 			long aiSeq;
 			byte[] toolsBytes;
 
 			synchronized (convLock) {
-				// Initialize index if needed
-				Path indexPath = convDir.resolve(INDEX_FILE);
-				if (!Files.exists(indexPath)) {
-					Files.createDirectories(convDir);
-					createIndex(indexPath, "", System.currentTimeMillis(), assistantName);
-				} else if (Files.size(indexPath) != INDEX_FILE_SIZE) {
-					// Corrupted or old-version index.bin, delete and recreate
-					Files.delete(indexPath);
-					createIndex(indexPath, "", System.currentTimeMillis(), assistantName);
-				}
-
-				long idxSeq = readIndexSeq(indexPath);
+				Path indexPath = storage.indexFile(convDir);
+				storage.ensureIndex(convDir, assistantName);
+				long idxSeq = storage.readIndexSeq(indexPath);
 
 				if (isRegenerate) {
 					// Regenerate: reuse existing AI seq, don't write user fragment
@@ -289,11 +245,11 @@ public class EasyChatService {
 				} else {
 					userSeq = idxSeq;
 					aiSeq = idxSeq + 1;
-					writeSeq(indexPath, idxSeq + 2);
+					storage.writeIndexSeq(indexPath, idxSeq + 2);
 
 					// Write user fragment (raw body bytes, no JSON parsing)
-					writeFragment(convDir, userSeq, System.currentTimeMillis(), bodyBytes);
-					Path fragFile = fragmentFile(convDir, userSeq);
+					storage.writeFragment(convDir, userSeq, System.currentTimeMillis(), bodyBytes);
+					Path fragFile = storage.fragmentFile(convDir, userSeq);
 					logger.info("[EasyChat] 写入用户碎片 seq={} path={} exists={} size={}",
 						userSeq, fragFile.toAbsolutePath(), Files.exists(fragFile),
 						Files.exists(fragFile) ? Files.size(fragFile) : -1);
@@ -304,16 +260,16 @@ public class EasyChatService {
 					JsonObject toolsObj = new JsonObject();
 					toolsObj.add("tools", toolsArr);
 					toolsObj.addProperty("tool_choice", toolChoice);
-					writeTools(convDir, JsonUtil.toJson(toolsObj).getBytes(StandardCharsets.UTF_8));
+					storage.writeTools(convDir, JsonUtil.toJson(toolsObj).getBytes(StandardCharsets.UTF_8));
 					toolsBytes = JsonUtil.toJson(toolsObj).getBytes(StandardCharsets.UTF_8);
 				} else {
-					toolsBytes = readTools(convDir);
+					toolsBytes = storage.readTools(convDir);
 				}
 
 				// Persist X-Variants to fragment headers
 				if (variants != null) {
 					for (Map.Entry<Long, Integer> entry : variants.entrySet()) {
-						writeActiveVariantIndex(convDir, entry.getKey(), entry.getValue());
+						storage.writeActiveVariantIndex(convDir, entry.getKey(), entry.getValue());
 					}
 				}
 			}
@@ -330,19 +286,17 @@ public class EasyChatService {
 			final boolean finalIsRegenerate = isRegenerate;
 			final Map<Long, Integer> finalVariants = variants;
 			final Long finalRegenerateSeq = regenerateSeq;
-			final byte[] finalBodyBytes = bodyBytes.clone();
 
 			// Dispatch to worker thread
 			worker.execute(() -> {
 				HttpURLConnection connection = null;
 				StreamAccumulator accumulator = new StreamAccumulator();
-				Path indexPath = finalConvDir.resolve(INDEX_FILE);
+				Path indexPath = storage.indexFile(finalConvDir);
 				try {
 					if (finalIsRemoteNode) {
 						handleRemoteNodeRequest(ctx, conversationId, finalNodeId, finalModelId,
 							finalSystemPrompt, finalConvDir, finalToolsBytes, finalSamplingParams,
-							finalVariants, finalRegenerateSeq, finalBodyBytes, finalIsRegenerate,
-							aiSeq, accumulator, indexPath);
+							finalVariants, finalRegenerateSeq, accumulator);
 					} else {
 						connection = openTrackedConnection(ctx, finalModelId, finalModelPort);
 
@@ -371,7 +325,7 @@ public class EasyChatService {
 						ctx.flush();
 
 						// Read and proxy SSE stream
-						proxySseStream(ctx, connection, finalModelId, accumulator);
+						proxySseStream(ctx, connection, accumulator);
 					}
 
 					// Write AI fragment and update state (always, if buffer has content)
@@ -380,10 +334,10 @@ public class EasyChatService {
 							JsonObject aiMsg = buildAiMessage(accumulator);
 							byte[] aiBytes = JsonUtil.toJson(aiMsg).getBytes(StandardCharsets.UTF_8);
 							if (finalIsRegenerate) {
-								appendFragment(finalConvDir, aiSeq, aiBytes);
+								storage.appendVariant(finalConvDir, aiSeq, aiBytes);
 							} else {
-								writeFragment(finalConvDir, aiSeq, System.currentTimeMillis(), aiBytes);
-								writeSeq(indexPath, aiSeq + 1);
+								storage.writeFragment(finalConvDir, aiSeq, System.currentTimeMillis(), aiBytes);
+								storage.writeIndexSeq(indexPath, aiSeq + 1);
 							}
 						}
 						if (!finalIsRegenerate) {
@@ -420,10 +374,10 @@ public class EasyChatService {
 								JsonObject aiMsg = buildAiMessage(accumulator);
 								byte[] aiBytes = JsonUtil.toJson(aiMsg).getBytes(StandardCharsets.UTF_8);
 								if (finalIsRegenerate) {
-									appendFragment(finalConvDir, aiSeq, aiBytes);
+									storage.appendVariant(finalConvDir, aiSeq, aiBytes);
 								} else {
-									writeFragment(finalConvDir, aiSeq, System.currentTimeMillis(), aiBytes);
-									writeSeq(indexPath, aiSeq + 1);
+									storage.writeFragment(finalConvDir, aiSeq, System.currentTimeMillis(), aiBytes);
+									storage.writeIndexSeq(indexPath, aiSeq + 1);
 								}
 							}
 						}
@@ -445,7 +399,7 @@ public class EasyChatService {
 					}
 					sendOpenAIError(ctx, 500, e.getMessage());
 				} finally {
-					cleanupConnection(ctx, connection);
+					cleanupConnection(ctx);
 				}
 			});
 
@@ -468,8 +422,7 @@ public class EasyChatService {
 
 		Path convDir;
 		try {
-			Path fragmentsBase = getFragmentsDir();
-			convDir = convDir(fragmentsBase, conversationId);
+			convDir = storage.getConversationDir(conversationId);
 		} catch (IOException e) {
 			logger.info("[EasyChat] 获取碎片目录失败 conversation={}", conversationId, e);
 			sendHistoryError(ctx, "获取目录失败: " + e.getMessage());
@@ -483,28 +436,19 @@ public class EasyChatService {
 		try {
 			long seq = 0;
 			while (true) {
-				Path file = fragmentFile(convDir, seq);
-				if (!Files.isRegularFile(file)) break;
-				int count;
-				try {
-					count = readFragmentCount(convDir, seq);
-				} catch (Exception e) {
-					// Old format without count field, assume 1
-					count = 1;
+				EasyChatStorage.FragmentHeader header = storage.readFragmentHeader(convDir, seq);
+				if (header == null) {
+					break;
 				}
-				for (int v = 0; v < count; v++) {
-					int len;
-					try {
-						len = readFragmentLength(convDir, seq, v);
-					} catch (Exception e) {
-						// Old format, compute from file size
-						len = (int) (Files.size(file) - FRAG_PAYLOAD_OFFSET);
-						if (len < 0) len = 0;
+				if (!storage.isDeleted(header)) {
+					for (int v = 0; v < header.variantCount; v++) {
+						totalSize += Math.max(0, header.lengths[v]);
+						if (v > 0) {
+							variantCount++;
+						}
 					}
-					totalSize += len;
-					if (v > 0) variantCount++;
+					recordCount++;
 				}
-				recordCount++;
 				seq++;
 			}
 		} catch (Exception e) {
@@ -535,24 +479,17 @@ public class EasyChatService {
 			long seq = 0;
 			boolean first = true;
 			while (true) {
-				Path file = fragmentFile(convDir, seq);
-				if (!Files.isRegularFile(file)) break;
-
-				int count;
-				try {
-					count = readFragmentCount(convDir, seq);
-				} catch (Exception e) {
-					count = 1;
+				EasyChatStorage.FragmentHeader header = storage.readFragmentHeader(convDir, seq);
+				if (header == null) {
+					break;
 				}
-
-				// Read first variant to extract role
-				byte[] firstPayload = readFragmentPayload(convDir, seq, 0);
-
-				// Skip empty messages (deleted messages: file size 188 = 160 header + 28 payload)
-				if (firstPayload != null && firstPayload.length == 28) {
+				if (storage.isDeleted(header)) {
 					seq++;
 					continue;
 				}
+
+				int roleVariantIndex = storage.resolveVariantIndex(header, 0);
+				byte[] firstPayload = roleVariantIndex < 0 ? new byte[0] : storage.readPayload(convDir, seq, roleVariantIndex);
 
 				if (!first) {
 					ctx.writeAndFlush(Unpooled.wrappedBuffer(comma));
@@ -572,37 +509,27 @@ public class EasyChatService {
 				}
 
 				// {"seq":N,"role":"R","activeVariant":N,"variants":[
-				int activeVariant = readActiveVariantIndex(convDir, seq);
+				int activeVariant = storage.resolveVariantIndex(header, header.activeVariantIndex);
+				if (activeVariant < 0) {
+					activeVariant = 0;
+				}
 				String msgPrefix = "{\"seq\":" + seq + ",\"role\":\"" + escapeJsonString(role)
 					+ "\",\"activeVariant\":" + activeVariant + ",\"variants\":[";
 				ctx.writeAndFlush(Unpooled.wrappedBuffer(msgPrefix.getBytes(StandardCharsets.UTF_8)));
 
 				// All variants
-				long variantOffset = FRAG_PAYLOAD_OFFSET;
-				for (int v = 0; v < count; v++) {
-					int vLen;
-					try {
-						vLen = readFragmentLength(convDir, seq, v);
-					} catch (Exception e) {
-						if (v == 0) {
-							vLen = (int) (Files.size(file) - FRAG_PAYLOAD_OFFSET);
-							if (vLen < 0) vLen = 0;
-						} else {
-							vLen = 0;
-						}
-					}
-
+				for (int v = 0; v < header.variantCount; v++) {
 					if (v > 0) {
 						ctx.writeAndFlush(Unpooled.wrappedBuffer(comma));
 					}
 					ctx.writeAndFlush(Unpooled.wrappedBuffer(variantPrefix));
-					if (vLen > 0) {
-						ctx.writeAndFlush(new DefaultFileRegion(file.toFile(), variantOffset, vLen));
+					EasyChatStorage.FragmentSlice slice = storage.getVariantSlice(convDir, seq, v);
+					if (slice != null && slice.length > 0) {
+						ctx.writeAndFlush(new DefaultFileRegion(slice.file.toFile(), slice.offset, slice.length));
 					} else {
 						ctx.writeAndFlush(Unpooled.wrappedBuffer("null".getBytes(StandardCharsets.UTF_8)));
 					}
 					ctx.writeAndFlush(Unpooled.wrappedBuffer(variantSuffix));
-					variantOffset += vLen;
 				}
 
 				ctx.writeAndFlush(Unpooled.wrappedBuffer(msgSuffix));
@@ -631,6 +558,11 @@ public class EasyChatService {
 
 	/* ---- Connection management ---- */
 
+	@FunctionalInterface
+	private interface TrackedConnection {
+		void close();
+	}
+
 	private HttpURLConnection openTrackedConnection(ChannelHandlerContext ctx, String modelId, int port) throws IOException {
 		String targetUrl = String.format("http://localhost:%d/v1/chat/completions", port);
 		HttpURLConnection connection = (HttpURLConnection) URI.create(targetUrl).toURL().openConnection();
@@ -640,414 +572,46 @@ public class EasyChatService {
 		connection.setReadTimeout(36000000);
 		connection.setDoOutput(true);
 		connection.setChunkedStreamingMode(8192);
-		synchronized (channelConnectionMap) {
-			channelConnectionMap.put(ctx, connection);
-		}
+		channelConnectionMap.put(ctx, connection::disconnect);
 		return connection;
 	}
 
-	private void cleanupConnection(ChannelHandlerContext ctx, HttpURLConnection connection) {
-		if (connection != null) {
-			connection.disconnect();
-		}
-		synchronized (channelConnectionMap) {
-			channelConnectionMap.remove(ctx);
-		}
-	}
-
-	/* ---- Index file I/O ---- */
-
-	private void createIndex(Path indexPath, String convName, long startTime, String assistantName) throws IOException {
-		try (RandomAccessFile raf = new RandomAccessFile(indexPath.toFile(), "rw")) {
-			FileChannel ch = raf.getChannel();
-			ByteBuffer buf = ByteBuffer.allocate(INDEX_FILE_SIZE).order(ByteOrder.LITTLE_ENDIAN);
-
-			// Header: 16 bytes of 0xFF
-			for (int i = 0; i < IDX_HEADER; i++) {
-				buf.put((byte) 0xFF);
-			}
-
-			// Conv name length + content
-			byte[] cnBytes = convName.getBytes(StandardCharsets.UTF_8);
-			buf.putInt(Math.min(cnBytes.length, IDX_CONV_NAME));
-			buf.put(cnBytes);
-			// Padding already zero from allocate
-
-			// Start time
-			buf.putLong(startTime);
-
-			// Assistant name length + content
-			byte[] anBytes = assistantName.getBytes(StandardCharsets.UTF_8);
-			buf.putInt(Math.min(anBytes.length, IDX_ASSISTANT_NAME));
-			buf.put(anBytes);
-
-			// Seq = 0
-			buf.putLong(0);
-			// Ensure full 8232 bytes written (zero-padded to end)
-			buf.position(INDEX_FILE_SIZE);
-
-			buf.flip();
-			ch.write(buf);
-		}
-	}
-
-   private long readIndexSeq(Path indexPath) throws IOException {
-        try (RandomAccessFile raf = new RandomAccessFile(indexPath.toFile(), "r")) {
-            raf.seek(INDEX_FILE_SIZE - IDX_SEQ);
-            ByteBuffer buf = ByteBuffer.allocate(IDX_SEQ).order(ByteOrder.LITTLE_ENDIAN);
-            raf.getChannel().read(buf);
-            buf.flip();
-            return buf.getLong();
-        }
-    }
-
-	private void writeSeq(Path indexPath, long seq) throws IOException {
-		try (RandomAccessFile raf = new RandomAccessFile(indexPath.toFile(), "rw")) {
-			raf.seek(INDEX_FILE_SIZE - IDX_SEQ);
-			ByteBuffer buf = ByteBuffer.allocate(IDX_SEQ).order(ByteOrder.LITTLE_ENDIAN);
-			buf.putLong(seq);
-			buf.flip();
-			raf.getChannel().write(buf);
-		}
-	}
-
-	/* ---- Fragment file I/O ---- */
-
-	private static String fragmentFileName(long seq) {
-		return String.format(FRAG_NAME_FMT, seq);
-	}
-
-	void writeFragment(Path dir, long seq, long timestamp, byte[] payload) throws IOException {
-		Path target = dir.resolve(fragmentFileName(seq));
-		Path temp = target.resolveSibling(target.getFileName().toString() + ".tmp");
-		try (RandomAccessFile raf = new RandomAccessFile(temp.toFile(), "rw")) {
-			FileChannel ch = raf.getChannel();
-			ByteBuffer buf = ByteBuffer.allocate(FRAG_HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
-			// Header: 16 bytes of 0xFF
-			for (int i = 0; i < 16; i++) {
-				buf.put((byte) 0xFF);
-			}
-			// Timestamp
-			buf.putLong(timestamp);
-			// Seq
-			buf.putLong(seq);
-			// Message count = 1
-			buf.putShort((short) 1);
-			// Active variant index = 0 (first/only variant)
-			buf.putShort((short) 0);
-			// Lengths table: first entry = payload length
-			buf.putInt(payload.length);
-			// Ensure full 160-byte header written (zero-padded to end)
-			buf.position(FRAG_HEADER_SIZE);
-			buf.flip();
-			ch.write(buf);
-			// Payload
-			ch.write(ByteBuffer.wrap(payload));
-		}
-		Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-	}
-
-	Path fragmentFile(Path dir, long seq) {
-		return dir.resolve(fragmentFileName(seq));
-	}
-
-	/**
-	 * Check if a fragment file exists for the given sequence number.
-	 */
-	boolean fragmentExists(Path dir, long seq) {
-		return Files.isRegularFile(fragmentFile(dir, seq));
-	}
-
-	/**
-	 * Read payload from a fragment file, skipping the 160-byte header.
-	 * Equivalent to readFragmentPayload(dir, seq, 0).
-	 */
-	byte[] readFragmentPayload(Path dir, long seq) throws IOException {
-		return readFragmentPayload(dir, seq, 0);
-	}
-
-	/**
-	 * Read a specific variant's payload from a fragment file.
-	 * Uses the length table in the header to locate the variant offset.
-	 */
-	byte[] readFragmentPayload(Path dir, long seq, int variantIndex) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		if (!Files.isRegularFile(file)) {
-			return null;
-		}
-		int[] lengths = readFragmentLengths(dir, seq);
-		if (lengths == null || variantIndex >= lengths.length || lengths[variantIndex] == 0) {
-			return new byte[0];
-		}
-		long offset = FRAG_PAYLOAD_OFFSET;
-		for (int i = 0; i < variantIndex; i++) {
-			offset += lengths[i];
-		}
-		byte[] payload = new byte[lengths[variantIndex]];
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.seek(offset);
-			raf.readFully(payload);
-		}
-		return payload;
-	}
-
-	/**
-	 * Read fragment header info: returns array of message lengths (size = count).
-	 */
-	int[] readFragmentInfo(Path dir, long seq) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		if (!Files.isRegularFile(file)) {
-			return null;
-		}
-		int count = readFragmentCount(dir, seq);
-		int[] lengths = new int[count];
-		for (int i = 0; i < count; i++) {
-			lengths[i] = readFragmentLength(dir, seq, i);
-		}
-		return lengths;
-	}
-
-	/**
-	 * Read message count from fragment header (offset 32, 2 bytes).
-	 */
-	private int readFragmentCount(Path dir, long seq) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.seek(FRAG_COUNT_OFFSET);
-			ByteBuffer buf = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
-			raf.getChannel().read(buf);
-			buf.flip();
-			return buf.getShort() & 0xFFFF;
-		}
-	}
-
-	/**
-	 * Read all lengths from fragment length table (offset 34, up to 10 × 4 bytes).
-	 * Returns array of FRAG_MAX_VARIANTS entries (remaining are 0).
-	 */
-	private int[] readFragmentLengths(Path dir, long seq) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		int[] lengths = new int[FRAG_MAX_VARIANTS];
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.seek(FRAG_LENGTHS_OFFSET);
-			ByteBuffer buf = ByteBuffer.allocate(FRAG_LENGTHS).order(ByteOrder.LITTLE_ENDIAN);
-			raf.getChannel().read(buf);
-			buf.flip();
-			for (int i = 0; i < FRAG_MAX_VARIANTS; i++) {
-				lengths[i] = buf.getInt();
-			}
-		}
-		return lengths;
-	}
-
-	/**
-	 * Read a single length entry at given variant index.
-	 */
-	private int readFragmentLength(Path dir, long seq, int variantIndex) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.seek(FRAG_LENGTHS_OFFSET + variantIndex * FRAG_LENGTH_ENTRY);
-			ByteBuffer buf = ByteBuffer.allocate(FRAG_LENGTH_ENTRY).order(ByteOrder.LITTLE_ENDIAN);
-			raf.getChannel().read(buf);
-			buf.flip();
-			return buf.getInt();
-		}
-	}
-
-	/**
-	 * Read active variant index from fragment header (offset 34, 2 bytes).
-	 * Returns 0 if file doesn't exist or read fails.
-	 */
-	private int readActiveVariantIndex(Path dir, long seq) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		if (!Files.isRegularFile(file)) {
-			return 0;
-		}
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.seek(FRAG_ACTIVE_VARIANT_OFFSET);
-			ByteBuffer buf = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
-			raf.getChannel().read(buf);
-			buf.flip();
-			short val = buf.getShort();
-			return val >= 0 ? val : 0;
-		} catch (Exception e) {
-			return 0;
-		}
-	}
-
-	/**
-	 * Write active variant index to fragment header (offset 34, 2 bytes).
-	 */
-	private void writeActiveVariantIndex(Path dir, long seq, int idx) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		if (!Files.isRegularFile(file)) {
+	private void trackConnection(ChannelHandlerContext ctx, TrackedConnection connection) {
+		if (connection == null) {
 			return;
 		}
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "rw")) {
-			raf.seek(FRAG_ACTIVE_VARIANT_OFFSET);
-			ByteBuffer buf = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
-			buf.putShort((short) idx);
-			buf.flip();
-			raf.getChannel().write(buf);
+		channelConnectionMap.put(ctx, connection);
+	}
+
+	private void cleanupConnection(ChannelHandlerContext ctx) {
+		TrackedConnection tracked = channelConnectionMap.remove(ctx);
+		if (tracked != null) {
+			try {
+				tracked.close();
+			} catch (Exception ignore) {
+			}
 		}
 	}
 
 	/**
-	 * Append a new variant to an existing fragment file.
-	 * Updates header: count++, lengths[newIdx], then appends payload at end of file.
+	 * 	在这构建请求体。
+	 * @param conn
+	 * @param modelId
+	 * @param systemPrompt
+	 * @param convDir
+	 * @param toolsBytes
+	 * @param samplingParams
+	 * @param variants
+	 * @param regenerateSeq
+	 * @throws IOException
 	 */
-	void appendFragment(Path dir, long seq, byte[] payload) throws IOException {
-		Path file = dir.resolve(fragmentFileName(seq));
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "rw")) {
-			// Read current count
-			raf.seek(FRAG_COUNT_OFFSET);
-			ByteBuffer countBuf = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
-			raf.getChannel().read(countBuf);
-			countBuf.flip();
-			short count = countBuf.getShort();
-
-			if (count >= FRAG_MAX_VARIANTS) {
-				throw new IOException("Fragment seq=" + seq + " already has " + count + " variants (max " + FRAG_MAX_VARIANTS + ")");
-			}
-
-			// Calculate new variant offset: header + sum of existing lengths
-			long payloadOffset = FRAG_PAYLOAD_OFFSET;
-			for (int i = 0; i < count; i++) {
-				raf.seek(FRAG_LENGTHS_OFFSET + i * FRAG_LENGTH_ENTRY);
-				ByteBuffer lenBuf = ByteBuffer.allocate(FRAG_LENGTH_ENTRY).order(ByteOrder.LITTLE_ENDIAN);
-				raf.getChannel().read(lenBuf);
-				lenBuf.flip();
-				payloadOffset += lenBuf.getInt();
-			}
-
-			// Update header: increment count, write new length
-			raf.seek(FRAG_COUNT_OFFSET);
-			ByteBuffer updBuf = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
-			updBuf.putShort((short) (count + 1));
-			updBuf.flip();
-			raf.getChannel().write(updBuf);
-
-			raf.seek(FRAG_LENGTHS_OFFSET + count * FRAG_LENGTH_ENTRY);
-			updBuf = ByteBuffer.allocate(FRAG_LENGTH_ENTRY).order(ByteOrder.LITTLE_ENDIAN);
-			updBuf.putInt(payload.length);
-			updBuf.flip();
-			raf.getChannel().write(updBuf);
-
-			// Set active variant to the newly appended variant
-			raf.seek(FRAG_ACTIVE_VARIANT_OFFSET);
-			updBuf = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
-			updBuf.putShort((short) count);
-			updBuf.flip();
-			raf.getChannel().write(updBuf);
-
-			// Append payload at end of file
-			raf.seek(payloadOffset);
-			raf.write(payload);
-		}
-	}
-
-	/* ---- Tools file I/O ---- */
-
-	private void writeTools(Path dir, byte[] data) throws IOException {
-		Path target = dir.resolve(TOOLS_FILE);
-		Path temp = target.resolveSibling(target.getFileName().toString() + ".tmp");
-		Files.write(temp, data);
-		Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
-	}
-
-	private byte[] readTools(Path dir) throws IOException {
-		Path file = dir.resolve(TOOLS_FILE);
-		if (!Files.isRegularFile(file)) {
-			return null;
-		}
-		return Files.readAllBytes(file);
-	}
-
-	/* ---- Request body streaming ---- */
-
-	private void writeRequestBody(HttpURLConnection conn, String modelId, String systemPrompt,
-		Path convDir, byte[] toolsBytes, JsonObject samplingParams,
-		Map<Long, Integer> variants, Long regenerateSeq) throws IOException {
-
-		StringBuilder sb = new StringBuilder();
-		sb.append("{\"model\":\"").append(escapeJsonString(modelId)).append("\",\"stream\":true,\"timings_per_token\":true,\"return_progress\":true,\"messages\":[\n");
-
-		// System prompt
-		if (systemPrompt != null && !systemPrompt.isBlank()) {
-			sb.append("{\"role\":\"system\",\"content\":\"").append(escapeJsonString(systemPrompt)).append("\"},\n");
-		}
-
-		// Stream fragment payloads
-		long seq = 0;
-		boolean first = true;
-		logger.info("[EasyChat] 构建请求体 convDir={} regenerateSeq={} variants={}",
-			convDir.toAbsolutePath(), regenerateSeq, variants);
-		while (true) {
-			byte[] payload = readFragmentPayload(convDir, seq);
-			logger.info("[EasyChat] 读取碎片 seq={} found={}", seq, payload != null);
-			if (payload == null) break;
-
-			// For regenerate: stop before the AI message being regenerated
-			if (regenerateSeq != null && seq == regenerateSeq) {
-				break;
-			}
-
-			// For AI messages, use specified variant if available, fallback to fragment header
-			if (variants != null && variants.containsKey(seq)) {
-				int variantIdx = variants.get(seq);
-				payload = readFragmentPayload(convDir, seq, variantIdx);
-			} else {
-				int activeVariant = readActiveVariantIndex(convDir, seq);
-				if (activeVariant > 0) {
-					payload = readFragmentPayload(convDir, seq, activeVariant);
-				}
-			}
-
-			if (!first) {
-				sb.append(',');
-			}
-			sb.append(new String(payload, StandardCharsets.UTF_8));
-			sb.append('\n');
-			first = false;
-			seq++;
-		}
-
-		// Close messages array
-		sb.append(']');
-
-		// Tools — parse and inline fields into the main JSON object
-		if (toolsBytes != null && toolsBytes.length > 0) {
-			JsonObject toolsObj = JsonUtil.tryParseObject(new String(toolsBytes, StandardCharsets.UTF_8));
-			if (toolsObj != null) {
-				for (String key : toolsObj.keySet()) {
-					sb.append(',').append('"').append(key).append('"').append(':').append(JsonUtil.toJson(toolsObj.get(key)));
-				}
-			}
-		}
-
-		// Sampling params from header (applied by ModelSamplingService)
-		if (samplingParams != null) {
-			JsonObject tempReq = new JsonObject();
-			tempReq.addProperty("model", modelId);
-			tempReq.add("samplingParams", samplingParams);
-			ModelSamplingService.getInstance().handleOpenAI(tempReq);
-			// Copy applied fields (exclude model, stream, messages)
-			for (String key : tempReq.keySet()) {
-				if ("model".equals(key) || "stream".equals(key) || "messages".equals(key) || "samplingParams".equals(key)) {
-					continue;
-				}
-				sb.append(',').append('"').append(key).append('"').append(':').append(JsonUtil.toJson(tempReq.get(key)));
-			}
-		}
-
-		// Close object
-		sb.append('}');
-
-		String requestBody = sb.toString();
-		logger.info("[EasyChat] llama.cpp请求体 ({} chars):\n{}", requestBody.length(), requestBody);
-
+	private void writeRequestBody(HttpURLConnection conn, String modelId, String systemPrompt, Path convDir,
+			byte[] toolsBytes, JsonObject samplingParams, Map<Long, Integer> variants, Long regenerateSeq)
+			throws IOException {
 		try (OutputStream os = conn.getOutputStream()) {
-			os.write(requestBody.getBytes(StandardCharsets.UTF_8));
+			requestWriter.writeRequestBody(os,
+				new EasyChatRequestWriter.RequestSpec(modelId, systemPrompt, convDir, toolsBytes,
+					samplingParams, variants, regenerateSeq));
 		}
 	}
 
@@ -1094,7 +658,7 @@ public class EasyChatService {
 	}
 
 	private boolean proxySseStream(ChannelHandlerContext ctx, HttpURLConnection connection,
-		String modelId, StreamAccumulator accumulator) throws IOException {
+		StreamAccumulator accumulator) throws IOException {
 
 		Map<Integer, String> toolCallIds = new HashMap<>();
 		try (BufferedReader br = new BufferedReader(
@@ -1313,39 +877,60 @@ public class EasyChatService {
 		}
 	}
 
-	/* ---- Charactor lookup ---- */
+	/* ---- Assistant config lookup ---- */
 
-	private CharactorDataStruct findCharactorByTitle(String title) {
-		if (title == null || title.isBlank()) return null;
+	private String resolveAssistantSystemPrompt(String assistantName) {
+		if (assistantName == null || assistantName.isBlank()) {
+			return null;
+		}
+		for (Path stateFile : getAssistantStateFiles()) {
+			String systemPrompt = readAssistantSystemPromptFromState(stateFile, assistantName);
+			if (systemPrompt != null && !systemPrompt.isBlank()) {
+				return systemPrompt;
+			}
+		}
+		logger.info("[EasyChat] 未在同步状态中找到助手 systemPrompt assistantName={}", assistantName);
+		return null;
+	}
+
+	private List<Path> getAssistantStateFiles() {
+		Path cachePath = LlamaServer.getCachePath().toAbsolutePath().normalize();
+		return List.of(
+			cachePath.resolve("chat").resolve("state.json"),
+			cachePath.resolve("easy-chat").resolve("state.json")
+		);
+	}
+
+	private String readAssistantSystemPromptFromState(Path stateFile, String assistantName) {
+		if (stateFile == null || assistantName == null || assistantName.isBlank() || !Files.isRegularFile(stateFile)) {
+			return null;
+		}
 		try {
-			List<CharactorDataStruct> chars = new CompletionService().listCharactor();
-			for (CharactorDataStruct c : chars) {
-				if (title.equals(c.getTitle())) {
-					return c;
+			JsonObject state = JsonUtil.fromJson(Files.readString(stateFile, StandardCharsets.UTF_8), JsonObject.class);
+			if (state == null || !state.has("assistants") || !state.get("assistants").isJsonArray()) {
+				return null;
+			}
+			JsonArray assistants = state.getAsJsonArray("assistants");
+			for (JsonElement element : assistants) {
+				if (element == null || !element.isJsonObject()) {
+					continue;
 				}
+				JsonObject assistant = element.getAsJsonObject();
+				String name = JsonUtil.getJsonString(assistant, "name", "");
+				if (!assistantName.equals(name)) {
+					continue;
+				}
+				String systemPrompt = JsonUtil.getJsonString(assistant, "systemPrompt", "");
+				return systemPrompt == null || systemPrompt.isBlank() ? null : systemPrompt;
 			}
 		} catch (Exception e) {
-			logger.warn("[EasyChat] 查找角色失败 title={}", title, e);
+			logger.warn("[EasyChat] 读取助手同步状态失败 stateFile={}", stateFile, e);
 		}
 		return null;
 	}
 
-	/* ---- Helpers ---- */
-
 	public Path getFragmentsDir() throws IOException {
-		Path dir = LlamaServer.getCachePath().resolve("easy-chat").resolve("fragments");
-		if (!Files.exists(dir)) {
-			Files.createDirectories(dir);
-		}
-		return dir;
-	}
-
-	private Path convDir(Path fragmentsBase, String conversationId) throws IOException {
-		Path dir = fragmentsBase.resolve(conversationId);
-		if (!Files.exists(dir)) {
-			Files.createDirectories(dir);
-		}
-		return dir;
+		return storage.getFragmentsDir();
 	}
 
 	/* ---- Delete operations ---- */
@@ -1376,152 +961,21 @@ public class EasyChatService {
 	}
 
 	/**
-	 * Delete a message: clear fragment payload.
-	 * If variantIndex is not null, only clear that variant (AI message).
-	 * If variantIndex is null, clear the entire payload (user message).
+	 * Delete a whole message or a single variant within a message.
 	 */
 	public void deleteMessage(String conversationId, long seq, Integer variantIndex) throws Exception {
-		Path fragmentsBase = getFragmentsDir();
-		Path dir = fragmentsBase.resolve(conversationId);
+		Path dir = storage.getConversationDir(conversationId);
 		if (!Files.exists(dir)) {
 			throw new IOException("Conversation directory not found: " + conversationId);
 		}
-		if (variantIndex != null) {
-			clearFragmentVariant(dir, seq, variantIndex);
-		} else {
-			clearFragmentPayload(dir, seq);
-		}
-	}
-
-	/**
-	 * Clear the entire payload of a fragment file.
-	 * Replaces the payload with empty JSON content.
-	 */
-	private void clearFragmentPayload(Path dir, long seq) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		if (!Files.isRegularFile(file)) {
-			logger.warn("[EasyChat] 清空碎片: 文件不存在 seq={}", seq);
-			return;
-		}
-		// Read header to preserve metadata
-		byte[] header = new byte[FRAG_HEADER_SIZE];
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.readFully(header);
-		}
-		// Build empty payload
-		byte[] emptyPayload = "{\"role\":\"user\",\"content\":\"\"}".getBytes(StandardCharsets.UTF_8);
-		// Rewrite file: header + empty payload
-		Path temp = file.resolveSibling(file.getFileName().toString() + ".tmp");
-		try (RandomAccessFile raf = new RandomAccessFile(temp.toFile(), "rw")) {
-			FileChannel ch = raf.getChannel();
-			// Write header with updated length
-			ByteBuffer hdrBuf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
-			// Reset count to 1
-			hdrBuf.position(FRAG_COUNT_OFFSET);
-			hdrBuf.putShort((short) 1);
-			// Reset active variant index to 0
-			hdrBuf.putShort((short) 0);
-			// Reset lengths table
-			hdrBuf.position(FRAG_LENGTHS_OFFSET);
-			hdrBuf.putInt(emptyPayload.length);
-			// Zero out remaining length entries
-			for (int i = 1; i < FRAG_MAX_VARIANTS; i++) {
-				hdrBuf.putInt(0);
-			}
-			hdrBuf.position(FRAG_HEADER_SIZE);
-			hdrBuf.flip();
-			ch.write(hdrBuf);
-			ch.write(ByteBuffer.wrap(emptyPayload));
-		}
-		Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
-		logger.info("[EasyChat] 清空碎片 payload 成功 seq={}", seq);
-	}
-
-	/**
-	 * Clear a specific variant in a fragment file.
-	 * Replaces the variant's payload with empty JSON, updates lengths table.
-	 */
-	private void clearFragmentVariant(Path dir, long seq, int variantIndex) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		if (!Files.isRegularFile(file)) {
-			logger.warn("[EasyChat] 清空变体: 文件不存在 seq={}", seq);
-			return;
-		}
-		// Read header
-		byte[] header = new byte[FRAG_HEADER_SIZE];
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.readFully(header);
-		}
-		ByteBuffer hdrBuf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
-		hdrBuf.position(FRAG_COUNT_OFFSET);
-		short count = hdrBuf.getShort();
-		short activeVariant = hdrBuf.getShort();
-		if (variantIndex < 0 || variantIndex >= count) {
-			throw new IOException("Variant index " + variantIndex + " out of range for seq=" + seq + " (count=" + count + ")");
-		}
-		// Read all lengths (position already at FRAG_LENGTHS_OFFSET after reading activeVariant)
-		int[] lengths = new int[FRAG_MAX_VARIANTS];
-		for (int i = 0; i < FRAG_MAX_VARIANTS; i++) {
-			lengths[i] = hdrBuf.getInt();
-		}
-		// Read all variant payloads
-		byte[][] payloads = new byte[count][];
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			for (int i = 0; i < count; i++) {
-				if (lengths[i] == 0) {
-					payloads[i] = new byte[0];
-					continue;
-				}
-				long offset = FRAG_PAYLOAD_OFFSET;
-				for (int j = 0; j < i; j++) {
-					offset += lengths[j];
-				}
-				payloads[i] = new byte[lengths[i]];
-				raf.seek(offset);
-				raf.readFully(payloads[i]);
+		Object convLock = conversationLocks.computeIfAbsent(conversationId, k -> new Object());
+		synchronized (convLock) {
+			if (variantIndex != null) {
+				storage.deleteVariant(dir, seq, variantIndex);
+			} else {
+				storage.deleteMessage(dir, seq);
 			}
 		}
-		// Remove the target variant: shift remaining variants down
-		int newCount = count - 1;
-		for (int i = variantIndex; i < newCount; i++) {
-			payloads[i] = payloads[i + 1];
-			lengths[i] = lengths[i + 1];
-		}
-		lengths[newCount] = 0;
-		// Adjust active variant index after deletion
-		if (activeVariant == variantIndex) {
-			activeVariant = newCount > 0 ? (short) 0 : (short) 0;
-		} else if (activeVariant > variantIndex) {
-			activeVariant--;
-		}
-		// Update count in header
-		hdrBuf.position(FRAG_COUNT_OFFSET);
-		hdrBuf.putShort((short) newCount);
-		// Rewrite file
-		Path temp = file.resolveSibling(file.getFileName().toString() + ".tmp");
-		try (RandomAccessFile raf = new RandomAccessFile(temp.toFile(), "rw")) {
-			FileChannel ch = raf.getChannel();
-			// Write header
-			ByteBuffer outBuf = ByteBuffer.allocate(FRAG_HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
-			outBuf.put(header);
-			outBuf.position(FRAG_ACTIVE_VARIANT_OFFSET);
-			outBuf.putShort(activeVariant);
-			outBuf.position(FRAG_LENGTHS_OFFSET);
-			for (int i = 0; i < FRAG_MAX_VARIANTS; i++) {
-				outBuf.putInt(lengths[i]);
-			}
-			outBuf.position(FRAG_HEADER_SIZE);
-			outBuf.flip();
-			ch.write(outBuf);
-			// Write compacted payloads
-			for (int i = 0; i < newCount; i++) {
-				if (payloads[i].length > 0) {
-					ch.write(ByteBuffer.wrap(payloads[i]));
-				}
-			}
-		}
-		Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
-		logger.info("[EasyChat] 删除变体成功 seq={} variantIndex={} count={} -> {}", seq, variantIndex, count, newCount);
 	}
 
 	private String readErrorBody(HttpURLConnection conn) throws IOException {
@@ -1577,62 +1031,7 @@ public class EasyChatService {
 	 * Reads header, replaces the target variant, rewrites the entire file.
 	 */
 	public void updateFragmentVariant(Path dir, long seq, int variantIndex, byte[] newPayload) throws IOException {
-		Path file = fragmentFile(dir, seq);
-		if (!Files.isRegularFile(file)) {
-			throw new IOException("Fragment file not found seq=" + seq);
-		}
-		byte[] header = new byte[FRAG_HEADER_SIZE];
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			raf.readFully(header);
-		}
-		ByteBuffer hdrBuf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN);
-		hdrBuf.position(FRAG_COUNT_OFFSET);
-		short count = hdrBuf.getShort();
-		if (variantIndex < 0 || variantIndex >= count) {
-			throw new IOException("Variant index " + variantIndex + " out of range for seq=" + seq + " (count=" + count + ")");
-		}
-		int[] lengths = new int[FRAG_MAX_VARIANTS];
-		hdrBuf.position(FRAG_LENGTHS_OFFSET);
-		for (int i = 0; i < FRAG_MAX_VARIANTS; i++) {
-			lengths[i] = hdrBuf.getInt();
-		}
-		byte[][] payloads = new byte[count][];
-		try (RandomAccessFile raf = new RandomAccessFile(file.toFile(), "r")) {
-			for (int i = 0; i < count; i++) {
-				if (lengths[i] == 0) {
-					payloads[i] = new byte[0];
-					continue;
-				}
-				long offset = FRAG_PAYLOAD_OFFSET;
-				for (int j = 0; j < i; j++) {
-					offset += lengths[j];
-				}
-				payloads[i] = new byte[lengths[i]];
-				raf.seek(offset);
-				raf.readFully(payloads[i]);
-			}
-		}
-		lengths[variantIndex] = newPayload.length;
-		payloads[variantIndex] = newPayload;
-		Path temp = file.resolveSibling(file.getFileName().toString() + ".tmp");
-		try (RandomAccessFile raf = new RandomAccessFile(temp.toFile(), "rw")) {
-			FileChannel ch = raf.getChannel();
-			ByteBuffer outBuf = ByteBuffer.allocate(FRAG_HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN);
-			outBuf.put(header);
-			outBuf.position(FRAG_LENGTHS_OFFSET);
-			for (int i = 0; i < FRAG_MAX_VARIANTS; i++) {
-				outBuf.putInt(lengths[i]);
-			}
-			outBuf.position(FRAG_HEADER_SIZE);
-			outBuf.flip();
-			ch.write(outBuf);
-			for (int i = 0; i < count; i++) {
-				if (payloads[i].length > 0) {
-					ch.write(ByteBuffer.wrap(payloads[i]));
-				}
-			}
-		}
-		Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING);
+		storage.updateVariant(dir, seq, variantIndex, newPayload);
 		logger.info("[EasyChat] 更新碎片变体成功 seq={} variantIndex={} newLength={}", seq, variantIndex, newPayload.length);
 	}
 
@@ -1643,90 +1042,19 @@ public class EasyChatService {
 	private void handleRemoteNodeRequest(ChannelHandlerContext ctx, String conversationId, String nodeId,
 		String modelId, String systemPrompt, Path convDir, byte[] toolsBytes,
 		JsonObject samplingParams, Map<Long, Integer> variants, Long regenerateSeq,
-		byte[] bodyBytes, boolean isRegenerate, long aiSeq,
-		StreamAccumulator accumulator, Path indexPath) throws Exception {
+		StreamAccumulator accumulator) throws Exception {
 
 		logger.info("[EasyChat][Remote] 转发到远程节点: nodeId={}, model={}, conversation={}", nodeId, modelId, conversationId);
-
-		// Build request body as JSON string (same logic as writeRequestBody)
-		StringBuilder sb = new StringBuilder();
-		sb.append("{\"model\":\"").append(escapeJsonString(modelId)).append("\",\"stream\":true,\"timings_per_token\":true,\"return_progress\":true,\"messages\":[\n");
-
-		if (systemPrompt != null && !systemPrompt.isBlank()) {
-			sb.append("{\"role\":\"system\",\"content\":\"").append(escapeJsonString(systemPrompt)).append("\"},\n");
-		}
-
-		// Stream fragment payloads (fragment already contains the new user message)
-		long seq = 0;
-		boolean first = true;
-		while (true) {
-			byte[] payload = readFragmentPayload(convDir, seq);
-			if (payload == null) break;
-
-			// For regenerate: stop before the AI message being regenerated
-			if (regenerateSeq != null && seq == regenerateSeq) {
-				break;
-			}
-
-			// For AI messages, use specified variant if available
-			if (variants != null && variants.containsKey(seq)) {
-				int variantIdx = variants.get(seq);
-				payload = readFragmentPayload(convDir, seq, variantIdx);
-			} else {
-				int activeVariant = readActiveVariantIndex(convDir, seq);
-				if (activeVariant > 0) {
-					payload = readFragmentPayload(convDir, seq, activeVariant);
-				}
-			}
-
-			if (!first) {
-				sb.append(',');
-			}
-			sb.append(new String(payload, StandardCharsets.UTF_8)).append('\n');
-			first = false;
-			seq++;
-		}
-
-		sb.append(']');
-
-		// Tools
-		if (toolsBytes != null && toolsBytes.length > 0) {
-			JsonObject toolsObj = JsonUtil.tryParseObject(new String(toolsBytes, StandardCharsets.UTF_8));
-			if (toolsObj != null) {
-				for (String key : toolsObj.keySet()) {
-					sb.append(',').append('"').append(key).append('"').append(':').append(JsonUtil.toJson(toolsObj.get(key)));
-				}
-			}
-		}
-
-		// Sampling params
-		if (samplingParams != null) {
-			JsonObject tempReq = new JsonObject();
-			tempReq.addProperty("model", modelId);
-			tempReq.add("samplingParams", samplingParams);
-			ModelSamplingService.getInstance().handleOpenAI(tempReq);
-			for (String key : tempReq.keySet()) {
-				if ("model".equals(key) || "stream".equals(key) || "messages".equals(key) || "samplingParams".equals(key)) {
-					continue;
-				}
-				sb.append(',').append('"').append(key).append('"').append(':').append(JsonUtil.toJson(tempReq.get(key)));
-			}
-		}
-
-		sb.append('}');
-		String requestBodyStr = sb.toString();
-		logger.info("[EasyChat][Remote] 请求体 ({} chars):\n{}", requestBodyStr.length(), requestBodyStr);
-
-		// Parse request body to JsonObject for NodeManager
-		JsonObject requestBody = JsonUtil.fromJson(requestBodyStr, JsonObject.class);
-		if (requestBody == null) {
-			throw new IllegalStateException("Failed to parse request body for remote node");
-		}
 
 		// Forward to remote node
 		NodeManager nodeManager = NodeManager.getInstance();
 		NodeManager.StreamResult streamResult = nodeManager.callRemoteApiStreaming(
-			nodeId, "POST", "v1/chat/completions", requestBody, null, 60000);
+			nodeId, "POST", "v1/chat/completions",
+			output -> requestWriter.writeRequestBody(output,
+				new EasyChatRequestWriter.RequestSpec(modelId, systemPrompt, convDir, toolsBytes,
+					samplingParams, variants, regenerateSeq)),
+			null, 60000);
+		trackConnection(ctx, streamResult::abort);
 
 		int responseCode = streamResult.getStatusCode();
 		logger.info("[EasyChat][Remote] 远程节点响应码: {} conversation={}", responseCode, conversationId);
@@ -1792,6 +1120,10 @@ public class EasyChatService {
 					if (json.has("timings")) {
 						accumulator.timings = json.getAsJsonObject("timings");
 					}
+					boolean changed = JsonUtil.ensureToolCallIds(json, toolCallIds);
+					if (changed) {
+						line = "data: " + JsonUtil.toJson(json);
+					}
 				}
 
 				writeSseLine(ctx, line);
@@ -1803,15 +1135,6 @@ public class EasyChatService {
 	 * Clean up tracked connection on channel inactive.
 	 */
 	public void channelInactive(ChannelHandlerContext ctx) {
-		synchronized (channelConnectionMap) {
-			HttpURLConnection conn = channelConnectionMap.remove(ctx);
-			if (conn != null) {
-				try {
-					conn.disconnect();
-				} catch (Exception e) {
-					// ignore
-				}
-			}
-		}
+		cleanupConnection(ctx);
 	}
 }

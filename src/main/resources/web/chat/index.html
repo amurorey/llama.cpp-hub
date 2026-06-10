@@ -501,14 +501,14 @@
     window.I18N = window.I18N || { t: function(key, fallback) { return fallback ?? key; } };
 
     const CHAT_ENDPOINT = '/v1/chat/completions';
-    const STREAM_CHAT_ENDPOINT = '/api/easy-chat/stream-chat';
+    const STREAM_CHAT_ENDPOINT = '/api/chat/stream-chat';
     const MODELS_ENDPOINT = '/v1/models';
     const EASY_CHAT_STATE_ENDPOINT = '/api/chat/state';
     const EASY_CHAT_STATE_REVISION_ENDPOINT = '/api/chat/state/revision';
     const EASY_CHAT_CONVERSATION_ENDPOINT = '/api/chat/conversation';
     const EASY_CHAT_SYNC_ENDPOINT = '/api/chat/sync';
     const EASY_CHAT_DELETE_ENDPOINT = '/api/chat/delete';
-    const EASY_CHAT_MESSAGE_UPDATE_ENDPOINT = '/api/easy-chat/message/update';
+    const EASY_CHAT_MESSAGE_UPDATE_ENDPOINT = '/api/chat/message/update';
     const STATE_REVISION_CONFLICT_CODE = 'STATE_REVISION_CONFLICT';
     const STATE_LOAD_TIMEOUT_MS = 30000;
     const STATE_SAVE_TIMEOUT_MS = 20000;
@@ -2040,6 +2040,28 @@
       return '';
     }
 
+    function extractMediaFromContent(contentArray) {
+      let text = '';
+      const images = [];
+      const audios = [];
+      const videos = [];
+      for (const item of (contentArray || [])) {
+        if (!item || typeof item !== 'object') continue;
+        if (item.type === 'text' && typeof item.text === 'string') {
+          text += item.text;
+        } else if (item.type === 'image_url' && item.image_url && typeof item.image_url.url === 'string') {
+          images.push({ id: makeImageId(), name: '图片', type: 'image/png', size: 0, dataUrl: item.image_url.url });
+        } else if (item.type === 'input_audio' && item.input_audio && typeof item.input_audio.data === 'string') {
+          const fmt = item.input_audio.format || 'wav';
+          audios.push({ id: makeAudioFileId(), name: 'audio.' + fmt, type: 'audio/' + fmt, size: 0, dataUrl: 'data:audio/' + fmt + ';base64,' + item.input_audio.data });
+        } else if (item.type === 'input_video' && item.input_video && typeof item.input_video.data === 'string') {
+          const fmt = item.input_video.format || 'mp4';
+          videos.push({ id: makeVideoFileId(), name: 'video.' + fmt, type: 'video/' + fmt, size: 0, dataUrl: 'data:video/' + fmt + ';base64,' + item.input_video.data });
+        }
+      }
+      return { text, images, audios, videos };
+    }
+
     function getCurrentConversation() {
       return state.conversations.find(item => item.id === state.currentConversationId) || null;
     }
@@ -2524,6 +2546,7 @@
             ? fallback.isStreaming
             : false,
         reasoning: typeof response?.reasoning === 'string' ? response.reasoning : typeof fallback.reasoning === 'string' ? fallback.reasoning : '',
+        toolCalls: normalizeMcpToolCalls(response?.toolCalls ?? fallback.toolCalls),
         time: typeof response?.time === 'string' ? response.time : typeof fallback.time === 'string' ? fallback.time : nowTime(),
         reasoningCollapsed: typeof response?.reasoningCollapsed === 'boolean'
           ? response.reasoningCollapsed
@@ -2581,7 +2604,7 @@
         reasoning: activeResponse.reasoning,
         time: activeResponse.time,
         reasoningCollapsed: activeResponse.reasoningCollapsed,
-        toolCalls: normalizeMcpToolCalls(message?.toolCalls)
+        toolCalls: normalizeMcpToolCalls(activeResponse.toolCalls)
       };
     }
 
@@ -2617,6 +2640,7 @@
       message.reasoning = normalized.reasoning;
       message.time = normalized.time;
       message.reasoningCollapsed = normalized.reasoningCollapsed;
+      message.toolCalls = normalized.toolCalls;
       return message;
     }
 
@@ -2628,6 +2652,7 @@
         performanceText: typeof extra.performanceText === 'string' ? extra.performanceText : '',
         isStreaming: !!extra.isStreaming,
         reasoning: typeof extra.reasoning === 'string' ? extra.reasoning : '',
+        toolCalls: normalizeMcpToolCalls(extra.toolCalls),
         time: typeof extra.time === 'string' ? extra.time : nowTime(),
         reasoningCollapsed: typeof extra.reasoningCollapsed === 'boolean' ? extra.reasoningCollapsed : true
       });
@@ -4148,6 +4173,19 @@
       if (!activeResponse) {
         return;
       }
+      if (Array.isArray(content)) {
+        const extracted = extractMediaFromContent(content);
+        content = extracted.text;
+        if (extracted.images.length) {
+          message.images = normalizeImages(message?.images).concat(extracted.images);
+        }
+        if (extracted.audios.length) {
+          message.audios = normalizeAudioFiles(message?.audios).concat(extracted.audios);
+        }
+        if (extracted.videos.length) {
+          message.videos = normalizeVideoFiles(message?.videos).concat(extracted.videos);
+        }
+      }
       activeResponse.content = content;
       activeResponse.reasoning = reasoning || '';
       if (typeof model === 'string' && model.trim()) {
@@ -4240,7 +4278,13 @@
       if (!message || message.role !== 'assistant') {
         return;
       }
-      message.toolCalls = finalizeMcpToolCalls(toolCalls);
+      const finalizedToolCalls = finalizeMcpToolCalls(toolCalls);
+      syncAssistantMessageState(message);
+      const activeResponse = getActiveAssistantResponse(message);
+      if (activeResponse) {
+        activeResponse.toolCalls = finalizedToolCalls;
+      }
+      message.toolCalls = finalizedToolCalls;
       conversation.updatedAt = Date.now();
       const article = els.messages.querySelector('article[data-index="' + index + '"]');
       if (article) {
@@ -4939,18 +4983,18 @@
 
           const contentType = response.headers.get('content-type') || '';
           removeTypingIndicator();
-          currentAssistantIndex = Number.isInteger(nextAssistantIndex) ? nextAssistantIndex : null;
-          if (!Number.isInteger(currentAssistantIndex)) {
-            pushMessage('assistant', '', { model: requestModel }, { incremental: true, persist: false });
-            const conv = getCurrentConversation();
-            currentAssistantIndex = conv ? conv.messages.length - 1 : null;
-          }
-          if (Number.isInteger(currentAssistantIndex)) {
-            setAssistantResponseStreaming(currentAssistantIndex, true);
-          }
 
           let result;
           if (contentType.includes('text/event-stream')) {
+            currentAssistantIndex = Number.isInteger(nextAssistantIndex) ? nextAssistantIndex : null;
+            if (!Number.isInteger(currentAssistantIndex)) {
+              pushMessage('assistant', '', { model: requestModel }, { incremental: true, persist: false });
+              const conv = getCurrentConversation();
+              currentAssistantIndex = conv ? conv.messages.length - 1 : null;
+            }
+            if (Number.isInteger(currentAssistantIndex)) {
+              setAssistantResponseStreaming(currentAssistantIndex, true);
+            }
             result = await consumeSse(response, currentAssistantIndex);
             updateLastAssistantMessage(
               result.content || '',
@@ -4959,9 +5003,52 @@
               result.timings,
               currentAssistantIndex
             );
+            if (Number.isInteger(currentAssistantIndex)) {
+              const conv = getCurrentConversation();
+              const msg = conv?.messages?.[currentAssistantIndex];
+              if (msg) {
+                if (Array.isArray(result.images) && result.images.length) {
+                  msg.images = normalizeImages(msg?.images).concat(result.images);
+                }
+                if (Array.isArray(result.audios) && result.audios.length) {
+                  msg.audios = normalizeAudioFiles(msg?.audios).concat(result.audios);
+                }
+                if (Array.isArray(result.videos) && result.videos.length) {
+                  msg.videos = normalizeVideoFiles(msg?.videos).concat(result.videos);
+                }
+              }
+            }
           } else {
-            result = extractTextFromJson(await response.json());
+            const jsonResp = await response.json();
+            if (jsonResp.success === false && jsonResp.error) {
+              throw new Error(jsonResp.error);
+            }
+            result = extractTextFromJson(jsonResp);
+            currentAssistantIndex = Number.isInteger(nextAssistantIndex) ? nextAssistantIndex : null;
+            if (!Number.isInteger(currentAssistantIndex)) {
+              pushMessage('assistant', '', { model: requestModel }, { incremental: true, persist: false });
+              const conv = getCurrentConversation();
+              currentAssistantIndex = conv ? conv.messages.length - 1 : null;
+            }
+            if (Number.isInteger(currentAssistantIndex)) {
+              setAssistantResponseStreaming(currentAssistantIndex, true);
+            }
             updateLastAssistantMessage(result.content || '', result.reasoning || '', result.model || requestModel, result.timings, currentAssistantIndex);
+            if (Number.isInteger(currentAssistantIndex)) {
+              const conv = getCurrentConversation();
+              const msg = conv?.messages?.[currentAssistantIndex];
+              if (msg) {
+                if (Array.isArray(result.images) && result.images.length) {
+                  msg.images = normalizeImages(msg?.images).concat(result.images);
+                }
+                if (Array.isArray(result.audios) && result.audios.length) {
+                  msg.audios = normalizeAudioFiles(msg?.audios).concat(result.audios);
+                }
+                if (Array.isArray(result.videos) && result.videos.length) {
+                  msg.videos = normalizeVideoFiles(msg?.videos).concat(result.videos);
+                }
+              }
+            }
           }
           if (Number.isInteger(currentAssistantIndex)) {
             setAssistantResponseStreaming(currentAssistantIndex, false);
@@ -5080,11 +5167,11 @@
 
       let assistantMessageIndex = conversation.messages.length - 1;
       let truncatedMessages = null;
+      let truncateEndIndex = userMessageIndex + 1;
 
       if (message.role === 'assistant') {
         const assistantIdx = index;
-        truncatedMessages = conversation.messages.slice(assistantIdx + 1);
-        conversation.messages = conversation.messages.slice(0, assistantIdx + 1);
+        truncateEndIndex = assistantIdx + 1;
         const assistantMessage = conversation.messages[assistantIdx];
         syncAssistantMessageState(assistantMessage);
         assistantMessage.timings = null;
@@ -5111,6 +5198,7 @@
           nextMsg.activeResponseIndex = nextMsg.responses.length - 1;
           syncAssistantMessageState(nextMsg);
           assistantMessageIndex = userMessageIndex + 1;
+          truncateEndIndex = assistantMessageIndex + 1;
         } else {
           pushMessage('assistant', '', {
             model: state.model,
@@ -5118,10 +5206,16 @@
             time: nowTime()
           }, { incremental: true, persist: false });
           assistantMessageIndex = conversation.messages.length - 1;
+          truncateEndIndex = assistantMessageIndex + 1;
         }
       }
 
-        conversation.updatedAt = Date.now();
+      if (truncateEndIndex < conversation.messages.length) {
+        truncatedMessages = conversation.messages.slice(truncateEndIndex);
+        conversation.messages = conversation.messages.slice(0, truncateEndIndex);
+      }
+
+      conversation.updatedAt = Date.now();
       renderConversationList();
       renderMessages();
       persistState();
@@ -5166,6 +5260,8 @@
             });
           } catch (e) {
             console.warn('[EasyChat] 删除变体失败', e);
+            showToast('error', window.I18N.t('page.chat.main.error.delete_failed', '删除失败'));
+            return;
           }
         }
         const nextMessages = conversation.messages.slice();
@@ -5191,11 +5287,14 @@
           });
         } catch (e) {
           console.warn('[EasyChat] 删除消息失败', e);
+          showToast('error', window.I18N.t('page.chat.main.error.delete_failed', '删除失败'));
+          return;
         }
       }
       const nextMessages = conversation.messages.slice();
-      const removeCount = message.role === 'user' && nextMessages[index + 1]?.role === 'assistant' ? 2 : 1;
-      nextMessages.splice(index, removeCount);
+      // Backend deletes exactly one fragment. Keep any following assistant message
+      // in the local list so the in-memory view stays consistent with history reload.
+      nextMessages.splice(index, 1);
       setConversationMessages(nextMessages);
       showToast('info', window.I18N.t('page.chat.main.action.delete', '删除'));
     }
@@ -5389,7 +5488,7 @@
       }
       if (parts.length === 1 && parts[0].type === 'text') {
         msg.content = parts[0].text;
-      } else if (parts.length > 1) {
+      } else if (parts.length >= 1) {
         msg.content = parts;
       } else {
         msg.content = text || '';
@@ -5399,10 +5498,30 @@
 
     function buildFragmentPayload(message) {
       if (!message || message.role === 'assistant') {
-        const obj = { role: message?.role || 'assistant', content: message?.content || '' };
-        const reasoning = message?.reasoning;
+        const assistantMessage = message && message.role === 'assistant'
+          ? syncAssistantMessageState({ ...message, responses: Array.isArray(message.responses) ? message.responses.slice() : message.responses })
+          : message;
+        const activeResponse = assistantMessage?.role === 'assistant'
+          ? getActiveAssistantResponse(assistantMessage)
+          : null;
+        const obj = { role: assistantMessage?.role || 'assistant', content: assistantMessage?.content || '' };
+        const reasoning = assistantMessage?.reasoning;
         if (reasoning) {
           obj.reasoning_content = reasoning;
+        }
+        const toolCalls = normalizeMcpToolCalls(activeResponse?.toolCalls ?? assistantMessage?.toolCalls);
+        if (toolCalls.length) {
+          obj.tool_calls = finalizeMcpToolCalls(toolCalls).map(toolCall => ({
+            id: toolCall.id,
+            type: 'function',
+            function: {
+              name: toolCall.name,
+              arguments: toolCall.arguments
+            }
+          }));
+        }
+        if (assistantMessage?.timings && typeof assistantMessage.timings === 'object') {
+          obj.timings = assistantMessage.timings;
         }
         return JSON.stringify(obj);
       }
@@ -5420,12 +5539,28 @@
       const variant = msg.variants[activeIdx] || msg.variants[0];
       const payload = variant?.content || {};
       const role = payload.role || msg.role || '';
-      const content = typeof payload.content === 'string' ? payload.content : (typeof payload.content === 'object' ? JSON.stringify(payload.content) : '');
+      let content;
+      let images = [];
+      let audios = [];
+      let videos = [];
+      if (Array.isArray(payload.content)) {
+        const extracted = extractMediaFromContent(payload.content);
+        content = extracted.text;
+        images = extracted.images;
+        audios = extracted.audios;
+        videos = extracted.videos;
+      } else {
+        content = typeof payload.content === 'string' ? payload.content : (typeof payload.content === 'object' ? JSON.stringify(payload.content) : '');
+      }
       const out = {
         id: 'hist-' + msg.seq,
         role,
         content,
-        order: msg.seq
+        images,
+        audios,
+        videos,
+        order: msg.seq,
+        fragmentSeq: msg.seq
       };
       if (role === 'assistant') {
         if (payload.reasoning_content) {
@@ -5442,7 +5577,8 @@
             const p = v?.content || {};
             const resp = {
               content: typeof p.content === 'string' ? p.content : '',
-              reasoning: p.reasoning_content || ''
+              reasoning: p.reasoning_content || '',
+              timings: p.timings && typeof p.timings === 'object' ? p.timings : null
             };
             if (p.tool_calls && p.tool_calls.length) {
               resp.toolCalls = normalizeMcpToolCalls(p.tool_calls);
@@ -5597,16 +5733,11 @@
       const choice = Array.isArray(json?.choices) ? json.choices[0] : null;
       const message = choice?.message;
       const delta = choice?.delta;
-      return {
+      const rawContent = message?.content ?? delta?.content ?? json?.message?.content ?? json?.content ?? '';
+      const result = {
         model: typeof json?.model === 'string' ? json.model : '',
         timings: normalizeTimings(json?.timings),
-        content: contentToText(
-          message?.content ??
-          delta?.content ??
-          json?.message?.content ??
-          json?.content ??
-          ''
-        ),
+        content: contentToText(rawContent),
         reasoning:
           message?.reasoning_content ??
           message?.reasoning ??
@@ -5621,6 +5752,13 @@
           []
         )
       };
+      if (Array.isArray(rawContent)) {
+        const extracted = extractMediaFromContent(rawContent);
+        result.images = extracted.images;
+        result.audios = extracted.audios;
+        result.videos = extracted.videos;
+      }
+      return result;
     }
 
     async function consumeSse(response, targetIndex) {
@@ -5632,8 +5770,16 @@
       let model = '';
       let timings = null;
       let toolCalls = [];
+      let lastContentArray = null;
       const finalizeResult = function () {
-        return { content: answer, reasoning, model, timings, toolCalls: finalizeMcpToolCalls(toolCalls) };
+        const result = { content: answer, reasoning, model, timings, toolCalls: finalizeMcpToolCalls(toolCalls) };
+        if (Array.isArray(lastContentArray)) {
+          const extracted = extractMediaFromContent(lastContentArray);
+          result.images = extracted.images;
+          result.audios = extracted.audios;
+          result.videos = extracted.videos;
+        }
+        return result;
       };
       const processSseLine = function (rawLine) {
         const line = typeof rawLine === 'string' ? rawLine.trim() : '';
@@ -5679,6 +5825,9 @@
           }
         }
         const chunkContent = contentToText(delta.content);
+        if (Array.isArray(delta.content)) {
+          lastContentArray = delta.content;
+        }
         const chunkReasoning =
           typeof delta.reasoning_content === 'string'
             ? delta.reasoning_content

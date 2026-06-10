@@ -386,11 +386,27 @@ public class NodeManager {
         }
     }
 
+    @FunctionalInterface
+    public interface RequestBodyWriter {
+        void writeTo(OutputStream output) throws IOException;
+    }
+
     /**
      * 流式远程 API 调用，返回 InputStream 用于逐行读取 SSE 响应
      * 使用 HttpURLConnection 以便在客户端断开时能真正中止远程连接
      */
     public StreamResult callRemoteApiStreaming(String nodeId, String method, String path, JsonObject body, java.util.Map<String, String> headers, int readTimeout) {
+        RequestBodyWriter bodyWriter = null;
+        if (body != null && (method.equals("POST") || method.equals("PUT"))) {
+            bodyWriter = output -> {
+                output.write(JsonUtil.toJson(body).getBytes(StandardCharsets.UTF_8));
+                output.flush();
+            };
+        }
+        return callRemoteApiStreaming(nodeId, method, path, bodyWriter, headers, readTimeout);
+    }
+
+    public StreamResult callRemoteApiStreaming(String nodeId, String method, String path, RequestBodyWriter bodyWriter, java.util.Map<String, String> headers, int readTimeout) {
         LlamaHubNode node = getNode(nodeId);
         if (node == null || node.baseUrl == null) {
             return new StreamResult(404, new java.io.ByteArrayInputStream(("Node not found: " + nodeId).getBytes(StandardCharsets.UTF_8)));
@@ -417,9 +433,10 @@ public class NodeManager {
             if (node.apiKey != null && !node.apiKey.isBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer " + node.apiKey);
             }
-            if (body != null && (method.equals("POST") || method.equals("PUT"))) {
+            if (bodyWriter != null && (method.equals("POST") || method.equals("PUT"))) {
                 connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 connection.setDoOutput(true);
+                connection.setChunkedStreamingMode(8192);
             }
             if (headers != null) {
                 for (java.util.Map.Entry<String, String> entry : headers.entrySet()) {
@@ -435,10 +452,9 @@ public class NodeManager {
                 }
             }
 
-            if (body != null && (method.equals("POST") || method.equals("PUT"))) {
+            if (bodyWriter != null && (method.equals("POST") || method.equals("PUT"))) {
                 try (OutputStream os = connection.getOutputStream()) {
-                    os.write(JsonUtil.toJson(body).getBytes(StandardCharsets.UTF_8));
-                    os.flush();
+                    bodyWriter.writeTo(os);
                 }
             }
 
