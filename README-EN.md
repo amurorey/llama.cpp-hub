@@ -7,6 +7,8 @@
 > The author has been refactoring and optimizing the project recently, but due to high complexity, various weird bugs keep appearing. **Easy Chat (the built-in chat tool)** has a risk of failing to load chat history.
 >
 > **Please do not store important content in Easy Chat.**
+>
+> ⚠️ **Warning: In future versions, the old Easy Chat logic will be completely rewritten, and all existing chat records will become unusable.**
 
 Slapping a web UI on llama.cpp — a graphical interface to wrangle models and llama.cpp. Packed with way too many bells and whistles.
 
@@ -238,6 +240,22 @@ It might get flagged by antivirus software (hello there, 360!). Don't worry — 
 2. Remote node usage is NOT tracked. If you burn through 1M tokens on node A, then aggregate node A under node B, node B will show 0 usage for those tokens
 3. As of May 22, 2026, embedding and reranking models have zero usage tracking
 4. That's it for now.
+
+## Guide: Disk & Memory Usage
+
+### Memory
+
+This app is built with Java, which means JVM — the notorious memory hog — is unavoidable. Memory usage has been optimized as much as possible. The JVM default heap is only 128MB (will be reduced further in the future; the author personally runs on 64MB).
+
+The trade-off: when request payloads get too large, they spill to disk. In other words, if someone decides to be creative and submits some ridiculously oversized requests, the app will buffer them to disk rather than let JVM memory explode.
+
+### Disk
+
+The app itself isn't that big, but llama.cpp can be — especially the CUDA and ROCm prebuilt packages, which take up nearly 1GB once extracted. Add in the disk buffering mentioned above, and you'll want to install this app somewhere with at least **2GB** of free disk space.
+
+**Usage statistics** don't take up much space — each request record is only 55 bytes. A million request logs come out to about 55MB. For a locally deployed model, reaching a million requests would take forever, so this is not a concern.
+
+**System logs** may consume a bit more space, but they're retained for a maximum of 7 days. If that's too long, you can adjust it in `log4j.xml`.
 
 ---
 
