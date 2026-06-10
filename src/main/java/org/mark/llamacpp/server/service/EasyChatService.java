@@ -53,6 +53,7 @@ import io.netty.handler.codec.http.LastHttpContent;
 public class EasyChatService {
 
 	private static final Logger logger = LoggerFactory.getLogger(EasyChatService.class);
+	private static final int STREAM_TIMEOUT_MS = 36000 * 1000;
 
 	private static EasyChatService instance;
 
@@ -305,6 +306,10 @@ public class EasyChatService {
 			final Map<Long, Integer> finalVariants = variants;
 			final Long finalRegenerateSeq = regenerateSeq;
 			final byte[] finalBodyBytes = bodyBytes;
+			// For persisted chats, the current message has already been written to fragments
+			// and will be replayed from history. Only ephemeral requests should append the
+			// transient body directly to the model request.
+			final byte[] finalTransientBodyBytes = finalIsEphemeral ? finalBodyBytes : null;
 
 			// Dispatch to worker thread
 			final EasyChatGlobalLock.Lease finalGlobalLease = globalLease;
@@ -316,14 +321,14 @@ public class EasyChatService {
 					if (finalIsRemoteNode) {
 						handleRemoteNodeRequest(ctx, conversationId, finalNodeId, finalModelId,
 							finalSystemPrompt, finalConvDir, finalToolsBytes, finalSamplingParams,
-							finalVariants, finalRegenerateSeq, finalBodyBytes, finalIsEphemeral, accumulator);
+							finalVariants, finalRegenerateSeq, finalTransientBodyBytes, finalIsEphemeral, accumulator);
 					} else {
 						connection = openTrackedConnection(ctx, finalModelId, finalModelPort);
 
 						// Stream request body to llama.cpp
 						writeRequestBody(connection, finalModelId, finalSystemPrompt, finalConvDir,
 							finalToolsBytes, finalSamplingParams, finalVariants, finalRegenerateSeq,
-							finalBodyBytes, finalIsEphemeral);
+							finalTransientBodyBytes, finalIsEphemeral);
 
 						int responseCode = connection.getResponseCode();
 						logger.info("[EasyChat] llama.cpp响应码: {} conversation={}", responseCode, conversationId);
@@ -1147,7 +1152,7 @@ public class EasyChatService {
 			output -> requestWriter.writeRequestBody(output,
 				new EasyChatRequestWriter.RequestSpec(modelId, systemPrompt, convDir, toolsBytes,
 					samplingParams, variants, regenerateSeq, transientUserMessage, skipHistory)),
-			null, 60000);
+			null, STREAM_TIMEOUT_MS);
 		trackConnection(ctx, streamResult::abort);
 
 		int responseCode = streamResult.getStatusCode();
