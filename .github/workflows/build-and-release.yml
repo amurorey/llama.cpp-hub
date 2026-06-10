@@ -401,6 +401,8 @@ jobs:
           cat > release_notes.md << 'EOF'
           ## 🚀 Release Notes
 
+          > ⚠️ **重要提示**：从该版本开始，旧的 Easy Chat 聊天记录将不再被支持，请做好备份。
+
           ### 📦 基础版本
           - 仅包含编译后的 class 文件和依赖库，不包含 JRE 和 llama.cpp
           - 需要系统已安装 Java 21+ 运行环境
