@@ -159,9 +159,12 @@
 
 | 方法 | 路径 | 说明 | 参数 |
 |------|------|------|------|
-| GET | `/api/models/config/get` | 获取启动配置包 | Query: `modelId, nodeId` |
+| GET | `/api/models/config/get` | 获取启动配置包（含共享配置） | Query: `modelId, nodeId` |
 | POST | `/api/models/config/set` | 保存启动配置 | `{modelId, configName, setSelected, config:{...}, nodeId}` |
 | POST | `/api/models/config/delete` | 删除启动配置 | `{modelId, configName, nodeId}` |
+| POST | `/api/models/config/shared/set` | 将模型配置设为共享 | `{modelId, configName, sharedName, nodeId}` |
+| GET | `/api/models/config/shared/get` | 获取全部共享配置 | Query: `nodeId` |
+| POST | `/api/models/config/shared/delete` | 删除共享配置 | `{sharedName, nodeId}` |
 
 ### 能力
 
@@ -393,7 +396,7 @@
 | 方法 | 路径 | 说明 | 请求体 |
 |------|------|------|--------|
 | POST | `/api/search/setting` | 保存智谱搜索 API 密钥 | `{zhipu_search_apikey}` 或 `{apiKey}` |
-| GET | `/api/sys/fastfetch` | 获取硬件信息 | Query: `nodeId` |
+| GET | `/api/sys/sysinfo` | 获取硬件信息（gpu-info） | Query: `nodeId` |
 | GET | `/api/model/device/list` | 列出 GPU 设备 | Query: `llamaBinPath, nodeId` |
 | POST | `/api/models/vram/estimate` | VRAM 估算 | `{modelId, cmd, device, mg, llamaBinPath, ...}` |
 
