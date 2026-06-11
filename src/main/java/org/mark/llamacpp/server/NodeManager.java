@@ -591,8 +591,6 @@ public class NodeManager {
             if (node.baseUrl != null) {
                 startWebSocketClient(node.nodeId, node.baseUrl);
             }
-        } else if (oldStatus == LlamaHubNode.NodeStatus.ONLINE && node.status == LlamaHubNode.NodeStatus.OFFLINE) {
-            stopWebSocketClient(node.nodeId);
         }
     }
 
