@@ -2,15 +2,10 @@ package org.mark.llamacpp.server.tools;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
 import com.google.gson.JsonArray;
@@ -22,7 +17,6 @@ import com.google.gson.JsonObject;
 public class GPUInfoHelper {
 
 	private static final GPUInfoHelper INSTANCE = new GPUInfoHelper();
-	private static final String CACHE_DIR_NAME = "cache/tools/easy-tools";
 
 	private volatile boolean initialized = false;
 	private String exePath;
@@ -58,25 +52,22 @@ public class GPUInfoHelper {
 				throw new UnsupportedOperationException("Unsupported OS: " + os);
 			}
 
-			Path cacheDir = Paths.get(CACHE_DIR_NAME, platform);
-			Files.createDirectories(cacheDir);
-
 			String exeName = platform.equals("windows") ? "gpu-info-x64.exe" : "gpu-info-x64";
 			String resourcePath = "/tools/easy-tools/" + platform + "/" + exeName;
 
-			copyFromClasspath(resourcePath, cacheDir.resolve(exeName));
+			URL resource = GPUInfoHelper.class.getResource(resourcePath);
+			if (resource == null) {
+				throw new IOException("gpu-info binary not found in resources: " + resourcePath);
+			}
 
-			exePath = cacheDir.resolve(exeName).toAbsolutePath().toString();
+			exePath = new File(resource.toURI()).getAbsolutePath();
 			File exeFile = new File(exePath);
 			if (!exeFile.exists()) {
-				throw new FileNotFoundException("gpu-info binary not extracted: " + exePath);
+				throw new IOException("gpu-info binary not found: " + exePath);
 			}
-			if (!exeFile.setExecutable(true, false) && !exeFile.canExecute()) {
+			if (!exeFile.canExecute()) {
 				if (platform.equals("linux")) {
-					try {
-						new ProcessBuilder("chmod", "+x", exePath).start().waitFor();
-					} catch (Exception ignored) {
-					}
+					new ProcessBuilder("chmod", "+x", exePath).start().waitFor();
 				}
 				if (!exeFile.canExecute()) {
 					throw new IOException("Failed to set executable permission: " + exePath);
@@ -186,17 +177,5 @@ public class GPUInfoHelper {
 		}
 
 		return output.toString();
-	}
-
-	private static void copyFromClasspath(String resource, Path dest) {
-		if (Files.exists(dest))
-			return;
-		try (InputStream is = GPUInfoHelper.class.getResourceAsStream(resource)) {
-			if (is == null)
-				return;
-			Files.copy(is, dest, StandardCopyOption.REPLACE_EXISTING);
-		} catch (IOException e) {
-			// non-fatal
-		}
 	}
 }
