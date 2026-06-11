@@ -43,17 +43,7 @@ public class DownloadWebSocketListener implements DownloadProgressListener {
 
 	@Override
 	public void onTaskFailed(DownloadTaskInfo task, String error) {
-		this.webSocketManager.sendDownloadStatusEvent(
-				task.getTaskId(),
-				mapState(DownloadTaskStatus.FAILED),
-				task.getDownloadedBytes(),
-				task.getTotalBytes(),
-				task.getPartsCompleted(),
-				task.getPartsTotal(),
-				resolveFileName(task),
-				error,
-				task.getSourceUrl(),
-				resolveParentPath(task));
+		// onStateChanged already sends the FAILED status update, no need to duplicate
 	}
 
 	@Override
