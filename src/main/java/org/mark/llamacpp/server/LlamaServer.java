@@ -34,6 +34,7 @@ import org.mark.llamacpp.server.channel.LlamaRouterHandler;
 import org.mark.llamacpp.server.io.ConsoleBroadcastOutputStream;
 import org.mark.llamacpp.server.io.ConsoleBufferLogAppender;
 import org.mark.llamacpp.server.mcp.McpClientService;
+import org.mark.llamacpp.server.service.AutoLoadPolicyManager;
 import org.mark.llamacpp.server.service.LlamaRecordService;
 import org.mark.llamacpp.server.service.ModelSamplingService;
 import org.mark.llamacpp.gguf.GGUFModel;
@@ -170,6 +171,8 @@ public class LlamaServer {
 		// 预加载模型列表，这会同时保存模型信息到配置文件
 		logger.info("正在扫描模型目录...");
 		serverManager.listModel();
+
+		AutoLoadPolicyManager.getInstance().loadConfig();
 		
 		ModelSamplingService.getInstance();
 

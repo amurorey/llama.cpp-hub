@@ -2121,6 +2121,7 @@ public class LlamaServerManager {
 	 * @param launchConfig 启动配置 bundle（含 selectedConfig, configs 等）
 	 * @return true = 资源充足，false = 资源不足
 	 */
+	@SuppressWarnings("unchecked")
 	public boolean canFitModelInMemory(String modelId, Map<String, Object> launchConfig) {
 		try {
 			logger.info("[自动加载] 开始硬件资源检查: modelId={}", modelId);

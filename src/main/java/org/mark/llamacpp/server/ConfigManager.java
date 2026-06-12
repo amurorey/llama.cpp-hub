@@ -793,4 +793,74 @@ public class ConfigManager {
 		}
 	}
 
+	/**
+	 * 获取模型的自动加载策略
+	 * @param modelId 模型 ID
+	 * @return "allow", "deny", 或 null（未设置）
+	 */
+	public String getAutoLoadPolicy(String modelId) {
+		synchronized (launchFileLock) {
+			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+			Map<String, Object> entry = allConfigs.get(modelId);
+			if (entry == null) {
+				return null;
+			}
+			Object autoLoad = entry.get("autoLoad");
+			if (autoLoad == null) {
+				return null;
+			}
+			return String.valueOf(autoLoad);
+		}
+	}
+
+	/**
+	 * 设置模型的自动加载策略
+	 * @param modelId 模型 ID
+	 * @param mode "allow" 或 "deny"
+	 * @return 是否保存成功
+	 */
+	public boolean setAutoLoadPolicy(String modelId, String mode) {
+		synchronized (launchFileLock) {
+			try {
+				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				Map<String, Object> entry = allConfigs.get(modelId);
+				if (entry == null) {
+					entry = new HashMap<>();
+					allConfigs.put(modelId, entry);
+				}
+				entry.put("autoLoad", mode);
+				writeJsonFileAtomic(LAUNCH_CONFIG_FILE, allConfigs);
+				logger.info("自动加载策略已设置: modelId={}, mode={}", modelId, mode);
+				return true;
+			} catch (IOException e) {
+				logger.info("设置自动加载策略失败: {}", e);
+				return false;
+			}
+		}
+	}
+
+	/**
+	 * 重置模型的自动加载策略（删除 autoLoad 字段）
+	 * @param modelId 模型 ID
+	 * @return 是否保存成功
+	 */
+	public boolean resetAutoLoadPolicy(String modelId) {
+		synchronized (launchFileLock) {
+			try {
+				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				Map<String, Object> entry = allConfigs.get(modelId);
+				if (entry == null) {
+					return true;
+				}
+				entry.remove("autoLoad");
+				writeJsonFileAtomic(LAUNCH_CONFIG_FILE, allConfigs);
+				logger.info("自动加载策略已重置: modelId={}", modelId);
+				return true;
+			} catch (IOException e) {
+				logger.info("重置自动加载策略失败: {}", e);
+				return false;
+			}
+		}
+	}
+
 }
