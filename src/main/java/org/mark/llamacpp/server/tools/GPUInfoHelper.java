@@ -6,7 +6,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -177,5 +179,82 @@ public class GPUInfoHelper {
 		}
 
 		return output.toString();
+	}
+
+	/**
+	 * 执行 gpu-info --json --memory 命令，获取包含内存信息的 JSON 输出。
+	 */
+	private String execJsonWithMemory() throws IOException {
+		ProcessBuilder pb = new ProcessBuilder(exePath, "--json", "--memory");
+		pb.redirectErrorStream(true);
+		Process process = pb.start();
+
+		StringBuilder output = new StringBuilder();
+		try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+			String line;
+			while ((line = reader.readLine()) != null) {
+				output.append(line).append('\n');
+			}
+		}
+
+		try {
+			int exitCode = process.waitFor();
+			if (exitCode != 0) {
+				throw new IOException("gpu-info exited with code " + exitCode + ": " + output);
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IOException("gpu-info execution interrupted", e);
+		}
+
+		return output.toString();
+	}
+
+	/**
+	 * 获取系统可用内存和GPU显存信息。
+	 * @return Map 包含:
+	 *   - "availableRam": 可用 RAM (bytes)
+	 *   - "availableVram": 可用 VRAM (bytes)
+	 *   失败返回 null
+	 */
+	public Map<String, Long> getMemoryInfo() {
+		try {
+			if (!isAvailable()) {
+				return null;
+			}
+			String output = execJsonWithMemory();
+			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
+			if (root == null) {
+				return null;
+			}
+			Map<String, Long> result = new HashMap<>();
+
+			// 解析 system.memory
+			JsonObject system = root.getAsJsonObject("system");
+			if (system == null) return null;
+			JsonObject mem = system.getAsJsonObject("memory");
+			if (mem == null) return null;
+
+			long totalRam = mem.has("total_bytes") ? mem.get("total_bytes").getAsLong() : 0;
+			long usedRam = mem.has("used_bytes") ? mem.get("used_bytes").getAsLong() : 0;
+			result.put("availableRam", totalRam - usedRam);
+
+			// 解析 devices[].memory.dedicated_vram_bytes
+			long totalVram = 0;
+			JsonArray devices = root.getAsJsonArray("devices");
+			if (devices != null) {
+				for (JsonElement dev : devices) {
+					JsonObject devMem = dev.getAsJsonObject().getAsJsonObject("memory");
+					if (devMem != null && devMem.has("dedicated_vram_bytes")) {
+						totalVram += devMem.get("dedicated_vram_bytes").getAsLong();
+					}
+				}
+			}
+			result.put("availableVram", totalVram);
+
+			return result;
+		} catch (Exception e) {
+			return null;
+		}
 	}
 }

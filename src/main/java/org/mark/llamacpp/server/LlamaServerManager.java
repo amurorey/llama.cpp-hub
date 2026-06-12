@@ -25,6 +25,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
@@ -43,6 +45,7 @@ import org.mark.llamacpp.server.struct.ApiResponse;
 import org.mark.llamacpp.server.struct.ModelPathConfig;
 import org.mark.llamacpp.server.struct.ModelPathDataStruct;
 import org.mark.llamacpp.server.tools.CommandLineRunner;
+import org.mark.llamacpp.server.tools.GPUInfoHelper;
 import org.mark.llamacpp.server.tools.ParamTool;
 import org.mark.llamacpp.server.tools.PortChecker;
 import org.slf4j.Logger;
@@ -2110,7 +2113,98 @@ public class LlamaServerManager {
 		resultMap.put("error", result.getError() != null ? result.getError() : "");
 		return resultMap;
 	}
-	
+
+	/**
+	 * 检查系统硬件资源是否足以承载指定模型。
+	 *
+	 * @param modelId      模型 ID
+	 * @param launchConfig 启动配置 bundle（含 selectedConfig, configs 等）
+	 * @return true = 资源充足，false = 资源不足
+	 */
+	public boolean canFitModelInMemory(String modelId, Map<String, Object> launchConfig) {
+		try {
+			// 1. 获取系统内存信息
+			GPUInfoHelper helper = GPUInfoHelper.getInstance();
+			if (helper.init() != null) return false;
+
+			Map<String, Long> memInfo = helper.getMemoryInfo();
+			if (memInfo == null) return false;
+
+			long availableRam = memInfo.get("availableRam");
+			long availableVram = memInfo.get("availableVram");
+
+			// 2. 从 launchConfig bundle 中提取 selectedConfig 对应的配置项
+			String selectedConfigName = (String) launchConfig.get("selectedConfig");
+			if (selectedConfigName == null || selectedConfigName.trim().isEmpty()) return false;
+			Map<String, Object> configs = (Map<String, Object>) launchConfig.get("configs");
+			if (configs == null) return false;
+			Map<String, Object> selectedConfig = (Map<String, Object>) configs.get(selectedConfigName);
+			if (selectedConfig == null) return false;
+
+			// 3. 提取参数
+			String llamaBinPath = (String) selectedConfig.get("llamaBinPathSelect");
+			if (llamaBinPath == null || llamaBinPath.trim().isEmpty()) {
+				llamaBinPath = (String) selectedConfig.get("llamaBinPath");
+			}
+			if (llamaBinPath == null || llamaBinPath.trim().isEmpty()) return false;
+
+			String cmd = (String) selectedConfig.getOrDefault("cmd", "");
+			String extraParams = (String) selectedConfig.getOrDefault("extraParams", "");
+			Object evObj = selectedConfig.get("enableVision");
+			boolean enableVision = evObj instanceof Boolean ? (Boolean) evObj : true;
+
+			List<String> cmdList = ParamTool.splitCmdArgs((cmd != null ? cmd : "") + " " + (extraParams != null ? extraParams : ""));
+			Map<String, String> result = handleFitParam(llamaBinPath, modelId, enableVision, cmdList);
+
+			String output = result.get("output");
+			if (output == null || output.trim().isEmpty()) return false;
+
+			// 4. 解析显存估算
+			long totalVram = parseVramFromFitOutput(output);
+			if (totalVram <= 0) return false;
+			long estimatedVramBytes = totalVram * 1024 * 1024;  // MiB -> bytes
+
+			// 5. 判断 --split-mode
+			String splitMode = getSplitMode(cmd, extraParams);
+			boolean isTensorParallel = "tensor".equalsIgnoreCase(splitMode);
+
+			// 6. 比较
+			if (isTensorParallel) {
+				return availableVram >= estimatedVramBytes * 1.1;
+			} else {
+				return (availableRam + availableVram) >= estimatedVramBytes * 1.1;
+			}
+		} catch (Exception e) {
+			logger.warn("[自动加载] 硬件检查失败: modelId={}, error={}", modelId, e.getMessage());
+			return false;
+		}
+	}
+
+	private long parseVramFromFitOutput(String output) {
+		Pattern devicePattern = Pattern.compile("(\\S+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)");
+		Matcher matcher = devicePattern.matcher(output);
+		long total = 0;
+		while (matcher.find()) {
+			String name = matcher.group(1);
+			if ("estimated".equalsIgnoreCase(name) || "MiB".equalsIgnoreCase(name)) continue;
+			total += Long.parseLong(matcher.group(2))
+				+ Long.parseLong(matcher.group(3))
+				+ Long.parseLong(matcher.group(4));
+		}
+		return total;
+	}
+
+	private String getSplitMode(String cmd, String extraParams) {
+		String combined = (cmd != null ? cmd : "") + " " + (extraParams != null ? extraParams : "");
+		List<String> args = ParamTool.splitCmdArgs(combined);
+		for (int i = 0; i < args.size() - 1; i++) {
+			if ("--split-mode".equals(args.get(i))) {
+				return args.get(i + 1);
+			}
+		}
+		return null;
+	}
+
 	/**
 	 * 	停止所有模型进程并退出Java进程
 	 */
