@@ -722,6 +722,14 @@ public class ConfigManager {
 
 		normalized.put("selectedConfig", selectedConfig);
 		normalized.put("configs", configs);
+		// 保留额外字段（如 autoLoad），防止归一化时丢失
+		if (entry != null) {
+			for (Map.Entry<String, Object> extra : entry.entrySet()) {
+				if (!"selectedConfig".equals(extra.getKey()) && !"configs".equals(extra.getKey())) {
+					normalized.put(extra.getKey(), extra.getValue());
+				}
+			}
+		}
 		return normalized;
 	}
 
