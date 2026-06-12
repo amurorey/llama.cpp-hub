@@ -152,7 +152,20 @@ jobs:
           cd "$(dirname "$0")"
           chmod +x ./jre/bin/java
           find ./jre -name jspawnhelper -exec chmod 755 {} \; 2>/dev/null || true
-          ./jre/bin/java -Xms128m -Xmx256m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.llamacpp.server.LlamaServer "$@"
+
+          # ============================================================
+          # JVM 内存参数说明 / JVM Memory Configuration
+          # ============================================================
+          # 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          # 模型由外部 llama.cpp 进程加载，不占用此 JVM 内存。
+          # 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          #
+          # This is a lightweight HTTP server with 128MB default memory.
+          # Models are loaded by external llama.cpp processes, not this JVM.
+          # Normally no adjustment needed. Only increase if you encounter
+          # OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          # ============================================================
+          ./jre/bin/java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.llamacpp.server.LlamaServer "$@"
           EOF
           chmod +x build/run.sh
 
@@ -161,7 +174,20 @@ jobs:
           cat > build/run.bat << 'EOF'
           @echo off
           cd /d "%~dp0"
-          start "" jre\bin\javaw.exe -Xms128m -Xmx256m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.llamacpp.server.LlamaServer %*
+
+          rem ============================================================
+          rem JVM 内存参数说明 / JVM Memory Configuration
+          rem ============================================================
+          rem 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          rem 模型由外部 llama.cpp 进程加载，不占用此 JVM 内存。
+          rem 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          rem
+          rem This is a lightweight HTTP server with 128MB default memory.
+          rem Models are loaded by external llama.cpp processes, not this JVM.
+          rem Normally no adjustment needed. Only increase if you encounter
+          rem OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          rem ============================================================
+          start "" jre\bin\javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.llamacpp.server.LlamaServer %*
           EOF
 
       - name: 创建启动脚本 (平台无关, 使用系统 Java)
@@ -170,13 +196,41 @@ jobs:
           cat > build-standalone/run.sh << 'EOF'
           #!/bin/bash
           cd "$(dirname "$0")"
-          java -Xms128m -Xmx256m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.llamacpp.server.LlamaServer "$@"
+
+          # ============================================================
+          # JVM 内存参数说明 / JVM Memory Configuration
+          # ============================================================
+          # Java 的内存管理机制与其他语言运行时不同：-Xmx 设定的最大堆内存
+          # 是硬性上限，JVM 无法弹性突破。如果加载大模型时遇到
+          # 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          # 模型由外部 llama.cpp 进程加载，不占用此 JVM 内存。
+          # 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          #
+          # This is a lightweight HTTP server with 128MB default memory.
+          # Models are loaded by external llama.cpp processes, not this JVM.
+          # Normally no adjustment needed. Only increase if you encounter
+          # OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          # ============================================================
+          java -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes:./lib/*" org.mark.llamacpp.server.LlamaServer "$@"
           EOF
           chmod +x build-standalone/run.sh
           cat > build-standalone/run.bat << 'EOF'
           @echo off
           cd /d "%~dp0"
-          start "" javaw.exe -Xms128m -Xmx256m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.llamacpp.server.LlamaServer %*
+
+          rem ============================================================
+          rem JVM 内存参数说明 / JVM Memory Configuration
+          rem ============================================================
+          rem 本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          rem 模型由外部 llama.cpp 进程加载，不占用此 JVM 内存。
+          rem 通常不需要调整。仅在遇到 OutOfMemoryError 时才考虑增加。
+          rem
+          rem This is a lightweight HTTP server with 128MB default memory.
+          rem Models are loaded by external llama.cpp processes, not this JVM.
+          rem Normally no adjustment needed. Only increase if you encounter
+          rem OutOfMemoryError (e.g. many concurrent connections or large uploads).
+          rem ============================================================
+          start "" javaw.exe -Xms128m -Xmx128m -XX:MaxDirectMemorySize=128m -classpath "./classes;./lib/*" org.mark.llamacpp.server.LlamaServer %*
           EOF
 
       - name: 复制文档到 build 目录
@@ -478,6 +532,19 @@ jobs:
             - AMD GPU: 使用 hip 版本，Linux系统，AI MAX+ 395（或其它ROCm7.2支持的GPU）可以使用ROCm7.2版本
             - 其他 GPU（如核显） 或不确定: 使用 vulkan 版本
             - 不需要llamacpp：使用无 llamacpp 版本
+
+          ### ⚠️ JVM 内存配置 / JVM Memory Configuration
+
+          本应用是轻量级 HTTP 服务器，默认分配 128MB 内存。
+          模型由外部 llama.cpp 进程加载，不占用此 JVM 内存。
+
+          This is a lightweight HTTP server with 128MB default memory.
+          Models are loaded by external llama.cpp processes, not this JVM.
+
+          > 💡 **作者的话 / Author's Note**: 我不想浪费兄弟们的内存，就设置个 128MB 又不是不能用！
+          > 真出问题了再改大，然后告诉我是怎么不够用的吧！
+          > I don't want to waste everyone's memory - 128MB works just fine!
+          > If you really run into issues, increase it and let me know what went wrong!
           ---
           ### 📌 最新提交
           EOF
