@@ -5601,12 +5601,14 @@
       }
       const thinkingLevel = normalizeThinkingLevel(assistant?.enableThinking) || 'off';
       if (thinkingLevel === 'unlimited') {
-        params.chat_template_kwargs = { enable_thinking: true };
+        params.enable_thinking = true;
       } else if (thinkingLevel !== 'off') {
         const thinkingBudget = Number(thinkingLevel);
         if (Number.isFinite(thinkingBudget) && thinkingBudget > 0) {
           params.thinking_budget_tokens = thinkingBudget;
         }
+      } else {
+        params.enable_thinking = false;
       }
       if (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) {
         for (const [key, value] of Object.entries(overrides)) {
@@ -6039,12 +6041,14 @@
         stream: !!assistant?.stream
       };
       if (thinkingLevel === 'unlimited') {
-        payload.chat_template_kwargs = { enable_thinking: true };
+        payload.enable_thinking = true;
       } else if (thinkingLevel !== 'off') {
         const thinkingBudget = Number(thinkingLevel);
         if (Number.isFinite(thinkingBudget) && thinkingBudget > 0) {
           payload.thinking_budget_tokens = thinkingBudget;
         }
+      } else {
+        payload.enable_thinking = false;
       }
       if (payload.stream) {
         payload.return_progress = true;

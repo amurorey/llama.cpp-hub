@@ -1248,7 +1248,7 @@ public class EasyChatService {
 			nodeId, "POST", "v1/chat/completions",
 			output -> requestWriter.writeRequestBody(output,
 				new EasyChatRequestWriter.RequestSpec(modelId, systemPrompt, convDir, toolsBytes,
-					samplingParams, true, variants, regenerateSeq, transientUserMessage, skipHistory, stream)),
+					samplingParams, false, variants, regenerateSeq, transientUserMessage, skipHistory, stream)),
 			null, STREAM_TIMEOUT_MS);
 		trackConnection(ctx, streamResult::abort);
 
