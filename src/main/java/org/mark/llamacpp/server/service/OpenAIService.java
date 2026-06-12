@@ -314,29 +314,21 @@ public class OpenAIService {
 			// 获取LlamaServerManager实例
 			LlamaServerManager manager = LlamaServerManager.getInstance();
 
-			String body = JsonUtil.toJson(requestJson);
-			String bodyNodeId = JsonUtil.getJsonString(requestJson, "nodeId", "");
-			if (bodyNodeId != null && !bodyNodeId.isBlank()) {
-				requestJson.remove("nodeId");
-				body = JsonUtil.toJson(requestJson);
-				NodeProxyService.getInstance().proxyStreamRequest(ctx, request, bodyNodeId, "v1/chat/completions", requestJson);
+			if (!manager.getLoadedProcesses().containsKey(modelName)) {
+				String resolved = manager.findModelIdByAlias(modelName);
+				if (resolved != null) {
+					modelName = resolved;
+				}
+			}
+			if (manager.getLoadedProcesses().containsKey(modelName)) {
+				Integer modelPort = manager.getModelPort(modelName);
+				if (modelPort == null) {
+					this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, "Model port not found: " + modelName, null);
+					return;
+				}
+				this.forwardRequestToLlamaCpp(ctx, request, modelName, modelPort, "/v1/chat/completions", isStream, JsonUtil.toJson(requestJson));
 			} else {
-				if (!manager.getLoadedProcesses().containsKey(modelName)) {
-					String resolved = manager.findModelIdByAlias(modelName);
-					if (resolved != null) {
-						modelName = resolved;
-					}
-				}
-				if (manager.getLoadedProcesses().containsKey(modelName)) {
-					Integer modelPort = manager.getModelPort(modelName);
-					if (modelPort == null) {
-						this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, "Model port not found: " + modelName, null);
-						return;
-					}
-					this.forwardRequestToLlamaCpp(ctx, request, modelName, modelPort, "/v1/chat/completions", isStream, body);
-				} else {
-					this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
-				}
+				this.sendOpenAIErrorResponseWithCleanup(ctx, 404, null, "Model not found: " + modelName, "model");
 			}
 		} catch (Exception e) {
 			logger.info("处理OpenAI聊天补全请求时发生错误", e);
