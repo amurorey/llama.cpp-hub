@@ -12,12 +12,15 @@ import java.util.Map;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 	这个东西用来执行gpu-info。
  */
 public class GPUInfoHelper {
 
+	private static final Logger logger = LoggerFactory.getLogger(GPUInfoHelper.class);
 	private static final GPUInfoHelper INSTANCE = new GPUInfoHelper();
 
 	private volatile boolean initialized = false;
@@ -220,11 +223,13 @@ public class GPUInfoHelper {
 	public Map<String, Long> getMemoryInfo() {
 		try {
 			if (!isAvailable()) {
+				logger.info("[自动加载] gpu-info 不可用: {}", getInitError());
 				return null;
 			}
 			String output = execJsonWithMemory();
 			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
 			if (root == null) {
+				logger.info("[自动加载] gpu-info JSON 解析失败");
 				return null;
 			}
 			Map<String, Long> result = new HashMap<>();
@@ -252,8 +257,12 @@ public class GPUInfoHelper {
 			}
 			result.put("availableVram", totalVram);
 
+			logger.info("[自动加载] 系统内存: availableRam={} GiB, availableVram={} GiB",
+				Math.round(result.get("availableRam") / 1024.0 / 1024.0 / 1024.0 * 100.0) / 100.0,
+				Math.round(result.get("availableVram") / 1024.0 / 1024.0 / 1024.0 * 100.0) / 100.0);
 			return result;
 		} catch (Exception e) {
+			logger.info("[自动加载] gpu-info 执行异常: {}", e.getMessage());
 			return null;
 		}
 	}

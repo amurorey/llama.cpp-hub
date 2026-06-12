@@ -2123,12 +2123,20 @@ public class LlamaServerManager {
 	 */
 	public boolean canFitModelInMemory(String modelId, Map<String, Object> launchConfig) {
 		try {
+			logger.info("[自动加载] 开始硬件资源检查: modelId={}", modelId);
+
 			// 1. 获取系统内存信息
 			GPUInfoHelper helper = GPUInfoHelper.getInstance();
-			if (helper.init() != null) return false;
+			if (helper.init() != null) {
+				logger.info("[自动加载] gpu-info 初始化失败，拒绝加载: modelId={}", modelId);
+				return false;
+			}
 
 			Map<String, Long> memInfo = helper.getMemoryInfo();
-			if (memInfo == null) return false;
+			if (memInfo == null) {
+				logger.info("[自动加载] 获取内存信息失败，拒绝加载: modelId={}", modelId);
+				return false;
+			}
 
 			long availableRam = memInfo.get("availableRam");
 			long availableVram = memInfo.get("availableVram");
@@ -2157,25 +2165,46 @@ public class LlamaServerManager {
 			Map<String, String> result = handleFitParam(llamaBinPath, modelId, enableVision, cmdList);
 
 			String output = result.get("output");
-			if (output == null || output.trim().isEmpty()) return false;
+			if (output == null || output.trim().isEmpty()) {
+				logger.info("[自动加载] llama-fit-params 输出为空，拒绝加载: modelId={}", modelId);
+				return false;
+			}
 
 			// 4. 解析显存估算
 			long totalVram = parseVramFromFitOutput(output);
-			if (totalVram <= 0) return false;
+			if (totalVram <= 0) {
+				logger.info("[自动加载] llama-fit-params 解析失败，拒绝加载: modelId={}", modelId);
+				return false;
+			}
 			long estimatedVramBytes = totalVram * 1024 * 1024;  // MiB -> bytes
+			logger.info("[自动加载] 显存估算: modelId={}, estimatedVram={} MiB ({} GiB)",
+				modelId, totalVram, String.format("%.2f", estimatedVramBytes / 1024.0 / 1024.0 / 1024.0));
 
 			// 5. 判断 --split-mode
 			String splitMode = getSplitMode(cmd, extraParams);
 			boolean isTensorParallel = "tensor".equalsIgnoreCase(splitMode);
+			logger.info("[自动加载] splitMode={}, isTensorParallel={}", splitMode, isTensorParallel);
 
 			// 6. 比较
+			long requiredBytes = (long) (estimatedVramBytes * 1.1);
 			if (isTensorParallel) {
-				return availableVram >= estimatedVramBytes * 1.1;
+				boolean ok = availableVram >= requiredBytes;
+				logger.info("[自动加载] Tensor并行模式: availableVram={} GiB, required={} GiB, result={}",
+					Math.round(availableVram / 1024.0 / 1024.0 / 1024.0 * 100.0) / 100.0,
+					Math.round(requiredBytes / 1024.0 / 1024.0 / 1024.0 * 100.0) / 100.0,
+					ok ? "PASS" : "FAIL");
+				return ok;
 			} else {
-				return (availableRam + availableVram) >= estimatedVramBytes * 1.1;
+				long totalAvailable = availableRam + availableVram;
+				boolean ok = totalAvailable >= requiredBytes;
+				logger.info("[自动加载] 非Tensor模式: totalAvailable={} GiB, required={} GiB, result={}",
+					Math.round(totalAvailable / 1024.0 / 1024.0 / 1024.0 * 100.0) / 100.0,
+					Math.round(requiredBytes / 1024.0 / 1024.0 / 1024.0 * 100.0) / 100.0,
+					ok ? "PASS" : "FAIL");
+				return ok;
 			}
 		} catch (Exception e) {
-			logger.warn("[自动加载] 硬件检查失败: modelId={}, error={}", modelId, e.getMessage());
+			logger.warn("[自动加载] 硬件检查异常: modelId={}, error={}", modelId, e.getMessage());
 			return false;
 		}
 	}
