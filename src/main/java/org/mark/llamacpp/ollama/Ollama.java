@@ -138,6 +138,8 @@ public class Ollama {
 					.channel(NioServerSocketChannel.class)
 					.option(ChannelOption.SO_BACKLOG, 1024)
 					.childOption(ChannelOption.SO_KEEPALIVE, true)
+					.childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 48 * 1024)
+					.childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 32 * 1024)
 					.childHandler(new ChannelInitializer<SocketChannel>() {
 						@Override
 						protected void initChannel(SocketChannel ch) throws Exception {

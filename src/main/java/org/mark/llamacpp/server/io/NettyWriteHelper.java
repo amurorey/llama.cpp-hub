@@ -23,6 +23,7 @@ public final class NettyWriteHelper {
 		if (ctx == null || ctx.channel() == null) {
 			return false;
 		}
+		long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
 		while (ctx.channel().isActive()) {
 			if (ctx.channel().isWritable()) {
 				return true;
@@ -34,7 +35,14 @@ public final class NettyWriteHelper {
 				}
 				return false;
 			}
-			LockSupport.parkNanos(WRITABLE_POLL_NANOS);
+			long remaining = deadline - System.nanoTime();
+			if (remaining <= 0) {
+				if (logger != null) {
+					logger.info("{} 客户端 10 秒未消费数据，判定为异常，停止响应发送", logPrefix);
+				}
+				return false;
+			}
+			LockSupport.parkNanos(Math.min(WRITABLE_POLL_NANOS, remaining));
 		}
 		if (logger != null) {
 			logger.info("{} 客户端连接已断开，停止响应发送", logPrefix);
