@@ -753,6 +753,14 @@ public class LlamaServerManager {
 	}
 
 	/**
+	 * 批量获取所有模型的自动加载策略
+	 * @return 模型ID到策略的映射
+	 */
+	public Map<String, String> getAllAutoLoadPolicies() {
+		return configManager.getAllAutoLoadPolicies();
+	}
+
+	/**
 	 * 设置模型的自动加载策略
 	 * @param modelId 模型 ID 或别名
 	 * @param mode "allow" 或 "deny"
@@ -762,6 +770,12 @@ public class LlamaServerManager {
 		String resolved = resolveModelId(modelId);
 		if (resolved == null) {
 			return "Model not found: " + modelId;
+		}
+		if ("allow".equalsIgnoreCase(mode)) {
+			String validationError = checkLaunchConfigValid(resolved);
+			if (validationError != null) {
+				return validationError;
+			}
 		}
 		configManager.setAutoLoadPolicy(resolved, mode);
 		buildAutoLoadModelCache();
@@ -780,6 +794,39 @@ public class LlamaServerManager {
 		}
 		configManager.resetAutoLoadPolicy(resolved);
 		buildAutoLoadModelCache();
+		return null;
+	}
+
+	/**
+	 * 检查模型是否有可用的启动配置
+	 * @param modelId 模型 ID
+	 * @return null 表示可用，非 null 为错误信息
+	 */
+	@SuppressWarnings("unchecked")
+	private String checkLaunchConfigValid(String modelId) {
+		Map<String, Object> bundle = this.configManager.getModelLaunchConfigBundle(modelId);
+		if (bundle == null) {
+			return "模型未配置启动参数";
+		}
+		String selectedConfigName = (String) bundle.get("selectedConfig");
+		if (selectedConfigName == null || selectedConfigName.trim().isEmpty()) {
+			return "模型未配置启动参数";
+		}
+		Map<String, Object> configs = (Map<String, Object>) bundle.get("configs");
+		if (configs == null) {
+			return "模型未配置启动参数";
+		}
+		Map<String, Object> selectedConfig = (Map<String, Object>) configs.get(selectedConfigName);
+		if (selectedConfig == null) {
+			return "模型未配置启动参数";
+		}
+		String llamaBinPath = (String) selectedConfig.get("llamaBinPathSelect");
+		if (llamaBinPath == null || llamaBinPath.trim().isEmpty()) {
+			llamaBinPath = (String) selectedConfig.get("llamaBinPath");
+		}
+		if (llamaBinPath == null || llamaBinPath.trim().isEmpty()) {
+			return "模型未配置启动参数";
+		}
 		return null;
 	}
 

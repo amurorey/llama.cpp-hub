@@ -57,8 +57,14 @@ public class AutoLoadPolicyController implements BaseController {
 				proxyGetRemote(ctx, request, nodeId, "api/auto-load/policy");
 				return;
 			}
+			String modelId = params.get("modelId");
 			AutoLoadPolicyManager manager = AutoLoadPolicyManager.getInstance();
-			Map<String, Object> data = manager.getAllPolicies();
+			Map<String, Object> data;
+			if (modelId != null && !modelId.isBlank()) {
+				data = manager.getPolicyForModel(modelId);
+			} else {
+				data = manager.getAllPolicies();
+			}
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
 		} catch (Exception e) {
 			logger.info("获取自动加载策略失败", e);

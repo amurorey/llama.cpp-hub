@@ -822,6 +822,24 @@ public class ConfigManager {
 	}
 
 	/**
+	 * 批量获取所有模型的自动加载策略（一次性读取配置文件）
+	 * @return 模型ID到策略的映射
+	 */
+	public Map<String, String> getAllAutoLoadPolicies() {
+		synchronized (launchFileLock) {
+			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+			Map<String, String> policies = new HashMap<>();
+			for (Map.Entry<String, Map<String, Object>> entry : allConfigs.entrySet()) {
+				Object autoLoad = entry.getValue().get("autoLoad");
+				if (autoLoad != null) {
+					policies.put(entry.getKey(), String.valueOf(autoLoad));
+				}
+			}
+			return policies;
+		}
+	}
+
+	/**
 	 * 设置模型的自动加载策略
 	 * @param modelId 模型 ID
 	 * @param mode "allow" 或 "deny"

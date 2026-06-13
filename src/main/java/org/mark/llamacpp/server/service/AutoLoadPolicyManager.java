@@ -71,17 +71,31 @@ public class AutoLoadPolicyManager {
 	}
 
 	/**
-	 * 获取所有模型的自动加载策略
+	 * 获取单个模型的自动加载策略
+	 */
+	public Map<String, Object> getPolicyForModel(String modelId) {
+		Map<String, Object> result = new HashMap<>();
+		String policy = manager.getAutoLoadPolicy(modelId);
+		Map<String, Object> policiesMap = new HashMap<>();
+		policiesMap.put(modelId, policy != null ? policy : "deny");
+		result.put("policies", policiesMap);
+		result.put("models", new HashMap<>());
+		return result;
+	}
+
+	/**
+	 * 获取所有模型的自动加载策略（批量读取，只读一次配置文件）
 	 */
 	public Map<String, Object> getAllPolicies() {
 		Map<String, Object> result = new HashMap<>();
 
 		List<GGUFModel> models = manager.listModel();
-		Map<String, Object> modelsMap = new HashMap<>();
+		Map<String, String> allPolicies = manager.getAllAutoLoadPolicies();
 
+		Map<String, Object> modelsMap = new HashMap<>();
 		for (GGUFModel model : models) {
 			String modelId = model.getModelId();
-			String policy = manager.getAutoLoadPolicy(modelId);
+			String policy = allPolicies.get(modelId);
 			Map<String, Object> modelInfo = new HashMap<>();
 			modelInfo.put("modelId", modelId);
 			modelInfo.put("modelName", model.getName());
@@ -90,11 +104,8 @@ public class AutoLoadPolicyManager {
 		}
 
 		Map<String, Object> policiesMap = new HashMap<>();
-		for (String modelId : modelsMap.keySet()) {
-			String policy = manager.getAutoLoadPolicy(modelId);
-			if (policy != null) {
-				policiesMap.put(modelId, policy);
-			}
+		for (Map.Entry<String, String> entry : allPolicies.entrySet()) {
+			policiesMap.put(entry.getKey(), entry.getValue());
 		}
 
 		result.put("policies", policiesMap);
