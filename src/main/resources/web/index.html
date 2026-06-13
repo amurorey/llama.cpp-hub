@@ -2278,6 +2278,14 @@
                         </span>
                         <i class="fas fa-external-link-alt sidebar-quick-link-ext"></i>
                     </a>
+                    <a class="sidebar-quick-link" href="tools/cert-gen.html" target="_blank" rel="noopener noreferrer">
+                        <i class="fas fa-shield-alt sidebar-quick-link-icon"></i>
+                        <span class="sidebar-quick-link-text">
+                            <span class="sidebar-quick-link-domain">HTTPS Cert</span>
+                            <span class="sidebar-quick-link-desc" data-i18n="sidebar.tools.cert_gen_desc">sidebar.tools.cert_gen_desc</span>
+                        </span>
+                        <i class="fas fa-external-link-alt sidebar-quick-link-ext"></i>
+                    </a>
                 </div>
             </div>
             <div
@@ -2856,13 +2864,76 @@
                                     <button class="btn btn-primary" id="saveHttpsBtn"
                                         data-i18n="common.save">common.save</button>
                                 </div>
-                                <hr style="margin:1rem 0;border-color:var(--border-color);">
-                                <div class="setup-guide-header"
-                                    style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-bottom:0.5rem;">
-                                    <i class="fas fa-book"></i> <span
-                                        data-i18n="page.settings.https.setup_guide">page.settings.https.setup_guide</span>
+
+                                <!-- HTTPS Certificate Generation -->
+                                <div id="httpsCertGenSection" style="margin-top:1.25rem;padding:1rem;border:1px solid var(--border-color);border-radius:0.75rem;background:var(--sidebar-bg);">
+                                    <div style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-bottom:0.4rem;">
+                                        <i class="fas fa-certificate" style="color:#4f46e5;"></i> <span data-i18n="page.settings.https.cert_gen_title">page.settings.https.cert_gen_title</span>
+                                    </div>
+                                    <div class="form-text" style="margin-bottom:0.75rem;font-size:0.75rem;" data-i18n="page.settings.https.cert_gen_desc">page.settings.https.cert_gen_desc</div>
+
+                                    <div id="httpsCertGenError" style="display:none;margin-bottom:0.75rem;padding:0.5rem 0.75rem;color:#ef4444;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:0.5rem;font-size:0.75rem;"></div>
+
+                                    <div class="settings-field-row">
+                                        <div class="settings-field">
+                                            <label class="form-label" data-i18n="page.settings.https.cert_gen_ips">page.settings.https.cert_gen_ips</label>
+                                            <small class="form-text" data-i18n="page.settings.https.cert_gen_ips_desc">page.settings.https.cert_gen_ips_desc</small>
+                                            <textarea class="form-control" id="httpsCertGenIps" rows="3" placeholder="192.168.1.100"></textarea>
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="form-label" data-i18n="page.settings.https.cert_gen_hostnames">page.settings.https.cert_gen_hostnames</label>
+                                            <small class="form-text" data-i18n="page.settings.https.cert_gen_hostnames_desc">page.settings.https.cert_gen_hostnames_desc</small>
+                                            <textarea class="form-control" id="httpsCertGenHostnames" rows="3">localhost</textarea>
+                                        </div>
+                                    </div>
+
+                                    <div class="settings-field-row" style="margin-top:0.75rem;">
+                                        <div class="settings-field">
+                                            <label class="form-label" data-i18n="page.settings.https.cert_gen_cn">page.settings.https.cert_gen_cn</label>
+                                            <input class="form-control" id="httpsCertGenCn" type="text" placeholder="localhost">
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="form-label" data-i18n="page.settings.https.cert_gen_validity">page.settings.https.cert_gen_validity</label>
+                                            <input class="form-control" id="httpsCertGenValidity" type="number" min="1" value="3650">
+                                        </div>
+                                    </div>
+
+                                    <div class="settings-field-row" style="margin-top:0.75rem;">
+                                        <div class="settings-field">
+                                            <label class="form-label" data-i18n="page.settings.https.cert_gen_password">page.settings.https.cert_gen_password</label>
+                                            <input class="form-control" id="httpsCertGenPassword" type="text" placeholder="page.settings.https.cert_gen_password_placeholder" data-i18n="page.settings.https.cert_gen_password_placeholder" data-i18n-attr="placeholder">
+                                        </div>
+                                        <div class="settings-field">
+                                            <label class="form-label" data-i18n="page.settings.https.cert_gen_keysize">page.settings.https.cert_gen_keysize</label>
+                                            <select class="form-control" id="httpsCertGenKeysize">
+                                                <option value="2048">2048</option>
+                                                <option value="4096">4096</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="settings-field-row" style="margin-top:0.75rem;">
+                                        <div class="settings-field">
+                                            <label class="form-label" data-i18n="page.settings.https.cert_gen_output">page.settings.https.cert_gen_output</label>
+                                            <input class="form-control" id="httpsCertGenOutput" type="text" value="ssl">
+                                        </div>
+                                    </div>
+
+                                    <div class="settings-actions-row" style="justify-content:flex-start;gap:0.75rem;margin-top:0.75rem;padding-top:0.75rem;">
+                                        <button class="btn btn-primary" id="httpsCertGenBtn" data-i18n="page.settings.https.cert_gen_btn">page.settings.https.cert_gen_btn</button>
+                                        <span id="httpsCertGenStatus" style="font-size:0.75rem;color:var(--text-secondary);display:flex;align-items:center;gap:0.35rem;"></span>
+                                    </div>
+
+                                    <div id="httpsCertGenResult" style="display:none;margin-top:0.75rem;padding:0.75rem;border:1px solid var(--border-color);border-radius:0.5rem;background:var(--card-bg);font-size:0.75rem;">
+                                        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.35rem;margin-bottom:0.5rem;color:#10b981;font-weight:600;">
+                                            <span><i class="fas fa-check-circle"></i> <span data-i18n="page.settings.https.cert_gen_success">page.settings.https.cert_gen_success</span></span>
+                                            <button class="btn btn-secondary btn-sm" id="httpsCertGenCopyCmdBtn" type="button" data-i18n="common.copy_command">common.copy_command</button>
+                                        </div>
+                                        <div id="httpsCertGenResultContent"></div>
+                                        <div id="httpsCertGenFillHint" style="margin-top:0.5rem;padding:0.5rem;background:rgba(16,185,129,0.08);border-radius:0.4rem;color:#10b981;"></div>
+                                    </div>
                                 </div>
-                                <div id="httpsSetupDoc" class="https-setup-content"></div>
+
                             </div>
                         </div>
                     </div>

@@ -23,6 +23,7 @@ import org.mark.llamacpp.server.controller.ProxyController;
 import org.mark.llamacpp.server.controller.ParamController;
 import org.mark.llamacpp.server.controller.SystemController;
 import org.mark.llamacpp.server.controller.AutoLoadPolicyController;
+import org.mark.llamacpp.server.controller.CertController;
 import org.mark.llamacpp.server.controller.ToolController;
 import org.mark.llamacpp.server.controller.UsageReportController;
 import org.mark.llamacpp.server.exception.RequestMethodException;
@@ -67,6 +68,7 @@ public class BasicRouterHandler extends SimpleChannelInboundHandler<FullHttpRequ
 		pipeline.add(new SystemController());
 		pipeline.add(new UsageReportController());
 		pipeline.add(new AutoLoadPolicyController());
+		pipeline.add(new CertController());
 	}
 	
 	

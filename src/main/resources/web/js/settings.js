@@ -544,23 +544,113 @@
         }
     }
 
-    async function loadHttpsSetupGuide() {
-        const container = byId('httpsSetupDoc');
-        if (!container) return;
-        try {
-            const lang = (window.I18N && window.I18N.lang) || 'zh-CN';
-            const docPath = lang.startsWith('en') ? 'docs/HTTPS_SETUP.en.md' : 'docs/HTTPS_SETUP.zh.md';
-            const resp = await fetch(docPath);
-            if (!resp.ok) { container.textContent = 'Failed to load setup guide'; return; }
-            const md = await resp.text();
-            if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
-                container.innerHTML = marked.parse(md);
-            } else {
-                container.textContent = md;
+    let lastHttpsCertResult = null;
+
+    async function generateHttpsCert() {
+        const btn = byId('httpsCertGenBtn');
+        const status = byId('httpsCertGenStatus');
+        const errorEl = byId('httpsCertGenError');
+        const resultEl = byId('httpsCertGenResult');
+        const resultContent = byId('httpsCertGenResultContent');
+        const fillHint = byId('httpsCertGenFillHint');
+
+        if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+        if (resultEl) resultEl.style.display = 'none';
+
+        const ips = (byId('httpsCertGenIps')?.value || '').split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        const hostnames = (byId('httpsCertGenHostnames')?.value || '').split('\n').map(s => s.trim()).filter(s => s.length > 0);
+        const cn = (byId('httpsCertGenCn')?.value || '').trim();
+        const validity = parseInt(byId('httpsCertGenValidity')?.value) || 3650;
+        const password = (byId('httpsCertGenPassword')?.value || '').trim();
+        const keysize = parseInt(byId('httpsCertGenKeysize')?.value) || 2048;
+        const outputDir = (byId('httpsCertGenOutput')?.value || '').trim() || 'ssl';
+
+        if (ips.length === 0 && hostnames.length === 0) {
+            if (errorEl) {
+                errorEl.textContent = t('page.settings.https.cert_gen_error_empty', '请至少输入一个 IP 地址或主机名');
+                errorEl.style.display = 'block';
             }
-        } catch (e) {
-            container.textContent = 'Failed to load setup guide';
+            return;
         }
+
+        if (btn) btn.disabled = true;
+        if (status) status.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + t('page.settings.https.cert_gen_running', '正在生成证书...');
+
+        try {
+            const resp = await fetch('/api/cert/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ips,
+                    hostnames,
+                    cn: cn || undefined,
+                    validity,
+                    password: password || undefined,
+                    keysize,
+                    outputDir
+                })
+            });
+            const json = await resp.json();
+
+            if (!json || !json.success) {
+                if (errorEl) {
+                    errorEl.textContent = (json && json.error) ? json.error : t('page.settings.https.cert_gen_failed', '生成失败');
+                    errorEl.style.display = 'block';
+                }
+                if (status) status.innerHTML = '';
+                return;
+            }
+
+            lastHttpsCertResult = json.data;
+            const certPathInput = byId('httpsCertPathInput');
+            const passwordInput = byId('httpsPasswordInput');
+            if (certPathInput && json.data.path) certPathInput.value = json.data.path;
+            if (passwordInput && json.data.password) passwordInput.value = json.data.password;
+            updateHttpsInputState();
+
+            if (resultContent) {
+                const cmdEscaped = (json.data.command || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                resultContent.innerHTML =
+                    '<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border-color);"><span style="color:var(--text-secondary);">' + t('page.settings.https.cert_gen_result_path', '文件路径') + '</span><code style="word-break:break-all;">' + escapeHtml(json.data.path || '') + '</code></div>' +
+                    '<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border-color);"><span style="color:var(--text-secondary);">' + t('page.settings.https.cert_gen_result_password', '密码') + '</span><code style="word-break:break-all;">' + escapeHtml(json.data.password || '') + '</code></div>' +
+                    '<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border-color);"><span style="color:var(--text-secondary);">' + t('page.settings.https.cert_gen_result_san', 'SAN') + '</span><code style="word-break:break-all;max-width:60%;font-size:0.65rem;">' + escapeHtml(json.data.san || '') + '</code></div>' +
+                    '<div style="display:flex;justify-content:space-between;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border-color);"><span style="color:var(--text-secondary);">' + t('page.settings.https.cert_gen_result_expire', '过期日期') + '</span><span>' + escapeHtml(json.data.expireDate || '') + '</span></div>' +
+                    '<div style="padding:0.35rem 0;"><span style="color:var(--text-secondary);display:block;margin-bottom:0.25rem;">' + t('page.settings.https.cert_gen_result_command', '执行命令') + '</span><code style="display:block;word-break:break-all;font-size:0.65rem;padding:0.4rem;background:var(--sidebar-bg);border-radius:0.3rem;">' + cmdEscaped + '</code></div>';
+            }
+            if (fillHint) {
+                fillHint.innerHTML = '<i class="fas fa-info-circle"></i> ' + t('page.settings.https.cert_gen_fill_hint', '证书路径和密码已自动填入上方配置，点击「保存」并重启服务后生效。');
+            }
+            if (resultEl) resultEl.style.display = 'block';
+            if (status) status.innerHTML = '<i class="fas fa-check-circle" style="color:#10b981;"></i> ' + t('page.settings.https.cert_gen_success', '生成成功');
+            toast(t('toast.success', '成功'), t('page.settings.https.cert_gen_success', '证书生成成功'), 'success');
+        } catch (e) {
+            if (errorEl) {
+                errorEl.textContent = t('common.network_request_failed', '网络请求失败') + ': ' + e.message;
+                errorEl.style.display = 'block';
+            }
+            if (status) status.innerHTML = '';
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function copyHttpsCertCommand() {
+        if (!lastHttpsCertResult || !lastHttpsCertResult.command) return;
+        navigator.clipboard.writeText(lastHttpsCertResult.command).then(() => {
+            toast(t('toast.success', '成功'), t('common.copied', '已复制'), 'success');
+        }).catch(() => {
+            toast(t('toast.error', '错误'), t('common.copy_failed', '复制失败'), 'error');
+        });
     }
 
     async function saveLogging() {
@@ -1821,7 +1911,11 @@
         const httpsToggle = byId('toggleHttpsEnabled');
         if (httpsToggle) httpsToggle.addEventListener('change', updateHttpsInputState);
 
-        loadHttpsSetupGuide();
+        const httpsCertGenBtn = byId('httpsCertGenBtn');
+        if (httpsCertGenBtn) httpsCertGenBtn.addEventListener('click', generateHttpsCert);
+
+        const httpsCertGenCopyCmdBtn = byId('httpsCertGenCopyCmdBtn');
+        if (httpsCertGenCopyCmdBtn) httpsCertGenCopyCmdBtn.addEventListener('click', copyHttpsCertCommand);
 
         // Logging tab
         const saveLoggingBtn = byId('saveLoggingBtn');
