@@ -5,6 +5,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="app.title">app.title</title>
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="apple-touch-icon" href="/icon/icon-192x192.png">
+    <meta name="theme-color" content="#f5f5f5">
     <link rel="stylesheet" href="css/all.min.css">
     <link href="css/css2.css" rel="stylesheet">
     <link rel="stylesheet" href="css/index.css">
@@ -6160,6 +6164,7 @@
     <script src="js/model-action-modal.js"></script>
     <script src="js/benchmark-v3.js"></script>
     <script src="js/usage-report.js"></script>
+    <script>if('serviceWorker'in navigator)navigator.serviceWorker.register('/service-worker.js');</script>
 </body>
 
 </html>

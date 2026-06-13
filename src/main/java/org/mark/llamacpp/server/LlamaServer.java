@@ -1843,6 +1843,12 @@ public class LlamaServer {
 			return "image/gif";
 		case "txt":
 			return "text/plain; charset=UTF-8";
+		case "ico":
+			return "image/x-icon";
+		case "svg":
+			return "image/svg+xml";
+		case "webmanifest":
+			return "application/manifest+json";
 		default:
 			return "application/octet-stream";
 		}
