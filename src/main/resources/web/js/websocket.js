@@ -172,12 +172,10 @@ function handleModelLoadEvent(data) {
 function handleModelStopEvent(data) {
     const nodeLabel = data.nodeId ? `[${data.nodeId}]` : '';
     showToast('模型停止', `模型 ${nodeLabel}${data.modelId} 停止${data.success ? '成功' : '失败'}`, data.success ? 'success' : 'error');
-    if (data.success) {
-        if (typeof removeModelLoadingState === 'function') removeModelLoadingState(data.modelId, data.nodeId);
-        applyModelPatch(data.modelId, { isLoading: false, isLoaded: false, status: 'stopped', port: null, slots: [] }, data.nodeId);
-        if (typeof updateModelSlotsDom === 'function') {
-            updateModelSlotsDom(data.modelId, [], data.nodeId);
-        }
+    if (typeof removeModelLoadingState === 'function') removeModelLoadingState(data.modelId, data.nodeId);
+    applyModelPatch(data.modelId, { isLoading: false, isLoaded: false, status: 'stopped', port: null, slots: [] }, data.nodeId);
+    if (typeof updateModelSlotsDom === 'function') {
+        updateModelSlotsDom(data.modelId, [], data.nodeId);
     }
 }
 
