@@ -622,6 +622,7 @@ public class EasyChatService {
 		resp.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
 		resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, body.length);
 		resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+		resp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		resp.content().writeBytes(body);
 		ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
 	}
@@ -1175,6 +1176,7 @@ public class EasyChatService {
 		resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, safeBytes.length);
 		resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 		resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+		resp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
 	}
 
@@ -1229,6 +1231,7 @@ public class EasyChatService {
 		byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 		resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
 		resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+		resp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		resp.content().writeBytes(bytes);
 		ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
 	}
@@ -1254,6 +1257,7 @@ public class EasyChatService {
 		resp.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
 		resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 		resp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+		resp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		resp.content().writeBytes(bytes);
 		ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
 	}

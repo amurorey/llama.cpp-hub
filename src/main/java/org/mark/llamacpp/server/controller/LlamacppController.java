@@ -1092,6 +1092,7 @@ public class LlamacppController implements BaseController {
 		response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+		response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		response.content().writeBytes(bytes);
 		ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
 	}

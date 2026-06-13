@@ -605,6 +605,7 @@ public class OpenAIService {
 					errResp.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
 					byte[] errBytes = responseBody.getBytes(StandardCharsets.UTF_8);
 					errResp.headers().set(HttpHeaderNames.CONTENT_LENGTH, errBytes.length);
+					errResp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 					errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 					errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
 					errResp.content().writeBytes(errBytes);
@@ -629,7 +630,7 @@ public class OpenAIService {
 				response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 				response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
 				response.content().writeBytes(respBytes);
-				ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
+				ctx.writeAndFlush(response);
 			} catch (Exception e) {
 				logger.info("转发非流式请求到远程节点时发生错误", e);
 				this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, e.getMessage(), null);
@@ -683,23 +684,24 @@ public class OpenAIService {
 				if (!(responseCode >= 200 && responseCode < 300)) {
 					FullHttpResponse errResp = new DefaultFullHttpResponse(
 						HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(responseCode));
-					errResp.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
-					String errBody = "";
-					try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
-						StringBuilder sb = new StringBuilder();
-						String line;
-						while ((line = br.readLine()) != null) {
-							sb.append(line);
-						}
-						errBody = sb.toString();
+				errResp.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
+				String errBody = "";
+				try (BufferedReader br = new BufferedReader(new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
+					StringBuilder sb = new StringBuilder();
+					String line;
+					while ((line = br.readLine()) != null) {
+						sb.append(line);
 					}
-					byte[] errBytes = errBody.getBytes(StandardCharsets.UTF_8);
-					errResp.headers().set(HttpHeaderNames.CONTENT_LENGTH, errBytes.length);
-					errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
-					errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
-					errResp.content().writeBytes(errBytes);
-					ctx.writeAndFlush(errResp).addListener(ChannelFutureListener.CLOSE);
-					return;
+					errBody = sb.toString();
+				}
+				byte[] errBytes = errBody.getBytes(StandardCharsets.UTF_8);
+				errResp.headers().set(HttpHeaderNames.CONTENT_LENGTH, errBytes.length);
+				errResp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
+				errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+				errResp.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
+				errResp.content().writeBytes(errBytes);
+				ctx.writeAndFlush(errResp).addListener(ChannelFutureListener.CLOSE);
+				return;
 				}
 
 				HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.valueOf(responseCode));
@@ -886,6 +888,7 @@ public class OpenAIService {
 		response.headers().set(HttpHeaderNames.CONTENT_TYPE,
 				(contentType == null || contentType.isBlank()) ? "application/json; charset=UTF-8" : contentType);
 		response.headers().set(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
+		response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
 		response.content().writeBytes(bytes);
@@ -1764,7 +1767,7 @@ public class OpenAIService {
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "GET, POST, PUT, DELETE, OPTIONS");
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
-		response.headers().set(HttpHeaderNames.CONNECTION, "alive");
+		response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		response.headers().set(HttpHeaderNames.DATE, this.sdf.format(new Date()));
 		
 		

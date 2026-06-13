@@ -74,6 +74,7 @@ import io.netty.handler.codec.http.DefaultHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaderValues;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpResponse;
@@ -1492,6 +1493,7 @@ public class LlamaServer {
 		FullHttpResponse response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status);
 		response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
 		response.headers().set(HttpHeaderNames.CONTENT_LENGTH, content.length);
+		response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		setCorsHeaders(response.headers());
 		response.content().writeBytes(content);
 
@@ -1515,7 +1517,7 @@ public class LlamaServer {
 		if (allowAllMethods) {
 			response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "*");
 		}
-		response.headers().set(HttpHeaderNames.CONNECTION, "alive");
+		response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		response.headers().set(HttpHeaderNames.DATE, ParamTool.getDate());
 		response.headers().set(HttpHeaderNames.ETAG, ParamTool.buildEtag(content));
 		response.headers().set("X-Powered-By", "Express");
@@ -1541,7 +1543,7 @@ public class LlamaServer {
 		if (allowAllMethods) {
 			response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_METHODS, "*");
 		}
-		response.headers().set(HttpHeaderNames.CONNECTION, "alive");
+		response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		response.headers().set(HttpHeaderNames.DATE, ParamTool.getDate());
 		response.headers().set(HttpHeaderNames.ETAG, ParamTool.buildEtag(bytes));
 		response.headers().set("X-Powered-By", "Express");
