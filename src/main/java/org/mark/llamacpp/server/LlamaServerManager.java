@@ -2271,7 +2271,7 @@ public class LlamaServerManager {
 		}
 		// 拼接完整命令路径
 		String command = exeFile.getAbsolutePath();
-		command += " --model " + modelMetaDataPath;
+		command += " --model " + ParamTool.quoteIfNeeded(modelMetaDataPath);
 		command += " -fitp on";
 		//
 		// 针对--main-gpu做特殊处理
@@ -2336,8 +2336,8 @@ public class LlamaServerManager {
 
 		String executableName = "llama-fit-params";
 		// 拼接完整命令路径
-		String command = llamaBinPath.trim() + File.separator + executableName;
-		command += " --model " + model.getPrimaryModel().getFilePath();
+		String command = ParamTool.quoteIfNeeded(llamaBinPath.trim() + File.separator + executableName);
+		command += " --model " + ParamTool.quoteIfNeeded(model.getPrimaryModel().getFilePath());
 		
 		// 仅针对--main-gpu做特殊处理
 		if(cmdMap.containsKey("--main-gpu")) {
@@ -2424,8 +2424,8 @@ public class LlamaServerManager {
 
 		String executableName = "llama-fit-params";
 		// 拼接完整命令路径
-		String command = llamaBinPath.trim() + File.separator + executableName;
-		command += " --model " + model.getPrimaryModel().getFilePath();
+		String command = ParamTool.quoteIfNeeded(llamaBinPath.trim() + File.separator + executableName);
+		command += " --model " + ParamTool.quoteIfNeeded(model.getPrimaryModel().getFilePath());
 		//command += " -lv 4";
 		command += " -fitp on";
 		
