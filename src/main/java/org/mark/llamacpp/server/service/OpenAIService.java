@@ -722,7 +722,12 @@ public class OpenAIService {
 						}
 						if (line.startsWith("data: ")) {
 							String data = line.substring(6);
-							if (data.equals("[DONE]")) break;
+							if (data.equals("[DONE]")) {
+								ByteBuf doneContent = ctx.alloc().buffer();
+								doneContent.writeBytes("data: [DONE]\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+								NettyWriteHelper.writeAndFlushBlocking(ctx, new DefaultHttpContent(doneContent), logger, "[OpenAIService-remote]");
+								break;
+							}
 
 							if (data.contains("\"timings\"")) {
 								Timing timing = LlamaRecordService.getInstance().handleStream(modelName, data, requestId);
@@ -1492,6 +1497,7 @@ public class OpenAIService {
 		response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/event-stream; charset=UTF-8");
 		response.headers().set(HttpHeaderNames.CACHE_CONTROL, "no-cache");
 		response.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.KEEP_ALIVE);
+		response.headers().set(HttpHeaderNames.TRANSFER_ENCODING, HttpHeaderValues.CHUNKED);
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN, "*");
 		response.headers().set(HttpHeaderNames.ACCESS_CONTROL_ALLOW_HEADERS, "*");
 		response.headers().set(HttpHeaderNames.ETAG, buildEtag((modelName + ":" + responseCode + ":" + System.nanoTime()).getBytes(StandardCharsets.UTF_8)));
@@ -1530,6 +1536,9 @@ public class OpenAIService {
 					// 检查是否为结束标记
 					if (data.equals("[DONE]")) {
 						logger.info("收到流式响应结束标记");
+						ByteBuf doneContent = ctx.alloc().buffer();
+						doneContent.writeBytes("data: [DONE]\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+						NettyWriteHelper.writeAndFlushBlocking(ctx, new DefaultHttpContent(doneContent), logger, "[OpenAIService-local]");
 						break;
 					}
 					else 

@@ -491,6 +491,9 @@ public class AnthropicService {
 
                     if (data.equals("[DONE]")) {
                         logger.info("收到流式响应结束标记");
+                        ByteBuf doneContent = ctx.alloc().buffer();
+                        doneContent.writeBytes("data: [DONE]\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+                        NettyWriteHelper.writeAndFlushBlocking(ctx, new DefaultHttpContent(doneContent), logger, "[AnthropicService]");
                         break;
                     }
 
