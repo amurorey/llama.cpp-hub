@@ -416,7 +416,9 @@ public class LlamaServerManager {
                 }
                this.ensureCapabilitiesFilesExistForCurrentList();
                 // 重建自动加载缓存
-                this.buildAutoLoadModelCache();
+                if (!this.list.isEmpty()) {
+                    this.buildAutoLoadModelCache();
+                }
             }
             // 如果集合不是空的，就直接返回。
             else {
