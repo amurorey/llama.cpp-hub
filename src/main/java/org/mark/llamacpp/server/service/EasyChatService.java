@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import org.mark.llamacpp.server.LlamaServer;
 import org.mark.llamacpp.server.LlamaServerManager;
 import org.mark.llamacpp.server.NodeManager;
+import org.mark.llamacpp.server.service.AutoLoadPolicyManager;
 import org.mark.llamacpp.server.io.NettyWriteHelper;
 import org.mark.llamacpp.server.struct.ActiveRequest;
 import org.mark.llamacpp.server.struct.ApiResponse;
@@ -208,13 +209,35 @@ public class EasyChatService {
 					}
 				}
 				if (!manager.getLoadedProcesses().containsKey(modelId)) {
-					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型未找到: " + modelId));
-					return;
+					// 尝试自动加载
+					if (AutoLoadPolicyManager.getInstance().canAutoLoad(modelId)) {
+						logger.info("[EasyChat][自动加载] 尝试加载模型: model={}", modelId);
+						long timeout = AutoLoadPolicyManager.getInstance().getAutoLoadTimeoutMs();
+						String loadError = manager.autoLoadModelFromConfig(modelId, timeout);
+						if (loadError == null) {
+							modelPort = manager.getModelPort(modelId);
+							if (modelPort != null) {
+								logger.info("[EasyChat][自动加载] 加载成功: model={}, port={}", modelId, modelPort);
+							} else {
+								LlamaServer.sendJsonResponse(ctx, ApiResponse.error("自动加载后未找到模型端口: " + modelId));
+								return;
+							}
+						} else {
+							logger.warn("[EasyChat][自动加载] 加载失败: model={}, error={}", modelId, loadError);
+							LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型加载失败: " + loadError));
+							return;
+						}
+					} else {
+						LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型未找到: " + modelId));
+						return;
+					}
 				}
-				modelPort = manager.getModelPort(modelId);
 				if (modelPort == null) {
-					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型端口未找到: " + modelId));
-					return;
+					modelPort = manager.getModelPort(modelId);
+					if (modelPort == null) {
+						LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型端口未找到: " + modelId));
+						return;
+					}
 				}
 			}
 
