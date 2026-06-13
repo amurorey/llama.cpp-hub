@@ -169,7 +169,7 @@
         <div id="audioRecorderComplete" class="audio-recorder-complete">
           <button id="audioRecorderDoneBtn" class="audio-recorder-action-btn audio-recorder-confirm" type="button" data-i18n="page.chat.main.recorder.done">完成</button>
         </div>
-        <div class="audio-recorder-hint" data-i18n="page.chat.main.recorder.hint">点击"开始录音"后，点击"停止录音"结束。支持 WAV / MP3 / M4A / OGG / FLAC 格式</div>
+        <div class="audio-recorder-hint" data-i18n="page.chat.main.recorder.hint">点击"开始录音"后，点击"停止录音"结束。支持 WAV / MP3 格式</div>
       </div>
     </div>
   </div>
@@ -1804,11 +1804,12 @@
 
     function isAudioFile(file) {
       const type = String(file?.type || '').toLowerCase();
-      if (type.startsWith('audio/')) {
+      const supportedAudioTypes = new Set(['audio/wav', 'audio/x-wav', 'audio/mpeg']);
+      if (supportedAudioTypes.has(type)) {
         return true;
       }
       const name = String(file?.name || '').toLowerCase();
-      return name.endsWith('.wav') || name.endsWith('.mp3') || name.endsWith('.ogg') || name.endsWith('.m4a') || name.endsWith('.flac');
+      return name.endsWith('.wav') || name.endsWith('.mp3');
     }
 
     function isVideoFile(file) {
@@ -5845,7 +5846,9 @@
       if (fileType.includes('/')) {
         const subtype = fileType.split('/')[1].split(';')[0].trim();
         if (subtype) {
-          return subtype.toLowerCase();
+          let fmt = subtype.toLowerCase();
+          if (fmt === 'mpeg') fmt = 'mp3';
+          return fmt;
         }
       }
       const fileName = typeof file?.name === 'string' ? file.name.trim() : '';
