@@ -534,7 +534,7 @@
     const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
     const MAX_TEXT_FILE_SIZE = 512 * 1024;
     const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
-    const MAX_VIDEO_SIZE = 4 * 1024 * 1024;
+    const MAX_VIDEO_SIZE = Infinity;
     const TEXT_FILE_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'json', 'js', 'ts', 'tsx', 'jsx', 'java', 'py', 'go', 'rs', 'c', 'cpp', 'h', 'hpp', 'cs', 'sh', 'bat', 'ps1', 'yaml', 'yml', 'xml', 'html', 'css', 'sql', 'log']);
     let stateSaveTimer = 0;
     let stateSaveRetryTimer = 0;
@@ -1965,7 +1965,6 @@
       let oversizedImageCount = 0;
       let oversizedTextCount = 0;
       let oversizedAudioCount = 0;
-      let oversizedVideoCount = 0;
       let imageLimitReached = false;
 
       for (const file of files) {
@@ -2014,10 +2013,6 @@
           continue;
         }
         if (isVideoFile(file)) {
-          if (Number(file.size || 0) > MAX_VIDEO_SIZE) {
-            oversizedVideoCount += 1;
-            continue;
-          }
           try {
             const dataUrl = await readFileAsDataUrl(file);
             state.draftVideoFiles.push({
@@ -2083,9 +2078,6 @@
       }
       if (oversizedAudioCount) {
         showToast('error', window.I18N.t('page.chat.main.file.audio_oversized', '{n} 个音频文件超过 25 MB，未添加').replace('{n}', oversizedAudioCount));
-      }
-      if (oversizedVideoCount) {
-        showToast('error', '{n} 个视频文件超过 4 MB，未添加'.replace('{n}', oversizedVideoCount));
       }
       if (imageLimitReached) {
         showToast('info', window.I18N.t('page.chat.main.file.image_limit', '最多只能添加 {n} 张图片').replace('{n}', MAX_IMAGE_COUNT));
@@ -4855,7 +4847,6 @@
       let oversizedImageCount = 0;
       let oversizedTextCount = 0;
       let oversizedAudioCount = 0;
-      let oversizedVideoCount = 0;
       let imageLimitReached = false;
 
       for (const file of files) {
@@ -4904,10 +4895,6 @@
           continue;
         }
         if (isVideoFile(file)) {
-          if (Number(file.size || 0) > MAX_VIDEO_SIZE) {
-            oversizedVideoCount += 1;
-            continue;
-          }
           try {
             const dataUrl = await readFileAsDataUrl(file);
             nextVideoFiles.push({
@@ -4982,9 +4969,6 @@
       }
       if (oversizedAudioCount) {
         showToast('error', window.I18N.t('page.chat.main.file.audio_oversized', '{n} 个音频文件超过 25 MB，未添加').replace('{n}', oversizedAudioCount));
-      }
-      if (oversizedVideoCount) {
-        showToast('error', '{n} 个视频文件超过 4 MB，未添加'.replace('{n}', oversizedVideoCount));
       }
       if (imageLimitReached) {
         showToast('info', window.I18N.t('page.chat.main.file.image_limit', '最多只能添加 {n} 张图片').replace('{n}', MAX_IMAGE_COUNT));

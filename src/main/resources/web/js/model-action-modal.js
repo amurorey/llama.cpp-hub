@@ -1383,7 +1383,10 @@ function submitModelAction() {
                 return;
             }
             if (typeof removeModelLoadingState === 'function') removeModelLoadingState(modelIdForStop);
-            closeModal('loadModelModal');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                applyModelActionSubmitButtonState(modal, mode);
+            }
         }).catch(() => {
             showToast(t('toast.error', '错误'), t('common.network_request_failed', '网络请求失败'), 'error');
             if (submitBtn) {
@@ -1488,7 +1491,10 @@ function submitModelAction() {
         if (res.success) {
             if (mode === 'config') {
                 showToast(t('toast.success', '成功'), t('modal.model_action.config.saved', '启动参数已保存'), 'success');
-                closeModal('loadModelModal');
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    applyModelActionSubmitButtonState(modal, mode);
+                }
             } else {
                 if (res.data && res.data.async) {
                     window.pendingModelLoad = { modelId: modelIdForUi };
@@ -1548,7 +1554,11 @@ function saveModelConfigAction() {
     }).then(r => r.json()).then(res => {
         if (res && res.success) {
             showToast(t('toast.success', '成功'), t('modal.model_action.config.saved', '启动参数已保存'), 'success');
-            closeModal('loadModelModal');
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = t('common.save', '保存');
+            }
+            if (submitBtn) submitBtn.disabled = false;
             return;
         }
         showToast(t('toast.error', '错误'), (res && res.error) ? res.error : t('common.save_failed', '保存失败'), 'error');
