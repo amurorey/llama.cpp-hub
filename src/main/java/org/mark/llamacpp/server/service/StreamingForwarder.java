@@ -24,7 +24,10 @@ public class StreamingForwarder {
     /* ---------- 目标字段常量 ---------- */
     private static final TargetField TARGET_MODEL = new TargetField("model", FieldType.STRING);
     private static final TargetField TARGET_ENABLE_THINKING = new TargetField("enable_thinking", FieldType.BOOLEAN);
-    private static final TargetField[] ALL_TARGETS = { TARGET_MODEL, TARGET_ENABLE_THINKING };
+    private static final TargetField TARGET_THINKING_BUDGET = new TargetField("thinking_budget_tokens", FieldType.NUMBER);
+    private static final TargetField TARGET_THINKING = new TargetField("thinking", FieldType.OBJECT);
+    private static final TargetField TARGET_THINKING_TYPE = new TargetField("type", FieldType.STRING, true);
+    private static final TargetField[] ALL_TARGETS = { TARGET_MODEL, TARGET_ENABLE_THINKING, TARGET_THINKING_BUDGET, TARGET_THINKING, TARGET_THINKING_TYPE };
 
     /* ---------- 状态机常量 ---------- */
     private static final int STATE_NORMAL         = 0;
@@ -54,6 +57,7 @@ public class StreamingForwarder {
     private boolean afterColon;
     private boolean inValueString;
     private int boolMatchLen;
+    private boolean inThinkingObject;
 
     /* nodeId 由外部从请求头设置，不从 body 提取 */
     private volatile String nodeId;
@@ -165,7 +169,7 @@ public class StreamingForwarder {
             throw new ForwarderException(400, "Missing required parameter: model", "model");
         }
 
-        return new TransformResult(modelName, nodeId, enableThinking != null ? enableThinking : false);
+        return new TransformResult(modelName, nodeId, enableThinking);
     }
 
     /**
@@ -222,9 +226,9 @@ public class StreamingForwarder {
                     if (b == '"') {
                         if (!inString) {
                             inString = true;
-                            /* 前瞻检查：是否为顶层目标字段 key */
-                            if (depth == 1) {
-                                TargetField matched = findMatchingTarget(chunk, i + 1);
+                            /* 前瞻检查：是否为顶层目标字段 key，或 thinking 对象内的 type */
+                            if (depth == 1 || (inThinkingObject && depth == 2)) {
+                                TargetField matched = findMatchingTarget(chunk, i + 1, depth, inThinkingObject);
                                 if (matched != null) {
                                     currentTarget = matched;
                                     keyMatchLen = 0;
@@ -246,6 +250,9 @@ public class StreamingForwarder {
                         break;
                     }
                     if (b == '}') {
+                        if (inThinkingObject && depth == 2) {
+                            inThinkingObject = false;
+                        }
                         depth--;
                         if (depth < 0) depth = 0;
                         if (depth == 0) {
@@ -277,8 +284,12 @@ public class StreamingForwarder {
                 case STATE_VALUE_PARSE: {
                     if (currentTarget.type() == FieldType.STRING) {
                         handleStringValue(b, prevState);
-                    } else {
+                    } else if (currentTarget.type() == FieldType.BOOLEAN) {
                         handleBooleanValue(b, prevState, chunk, i);
+                    } else if (currentTarget.type() == FieldType.NUMBER) {
+                        handleNumberValue(b, prevState, chunk, i);
+                    } else if (currentTarget.type() == FieldType.OBJECT) {
+                        handleObjectValue(b);
                     }
                     break;
                 }
@@ -319,8 +330,15 @@ public class StreamingForwarder {
             String val = (valueBuf == null) ? "" : valueBuf.toString();
             if (currentTarget == TARGET_MODEL) {
                 modelName = val;
+                bodyBuffer.setModelFound();
+            } else if (currentTarget == TARGET_THINKING_TYPE) {
+                String trimmed = val.trim();
+                if ("enabled".equalsIgnoreCase(trimmed)) {
+                    enableThinking = true;
+                } else if ("disabled".equalsIgnoreCase(trimmed)) {
+                    enableThinking = false;
+                }
             }
-            bodyBuffer.setModelFound();
             //logger.info("[状态机] *** 提取到 {}={}", currentTarget.name(), val);
             resetToNormal();
             return;
@@ -362,8 +380,28 @@ public class StreamingForwarder {
             if (!afterColon) {
                 return;
             }
-            /* 布尔值不应出现在引号中，重置 */
+            if (!inValueString) {
+                /* 布尔值以字符串形式出现，例如 "true" / "false" */
+                inValueString = true;
+                valueBuf = null;
+                return;
+            }
+            /* 字符串形式的布尔值关闭引号 */
+            String val = (valueBuf == null) ? "" : valueBuf.toString();
+            Boolean parsed = parseBooleanString(val);
+            if (parsed != null) {
+                enableThinking = parsed;
+            }
             resetToNormal();
+            return;
+        }
+
+        /* 字符串形式布尔值的字符累积 */
+        if (inValueString) {
+            if (valueBuf == null) {
+                valueBuf = new StringBuilder(32);
+            }
+            valueBuf.append((char) b);
             return;
         }
 
@@ -420,6 +458,120 @@ public class StreamingForwarder {
     }
 
     /**
+     * 解析数字类型的 value（用于 thinking_budget_tokens 字段）。
+     * 仅解析正整数，当值大于 0 时表示启用 thinking。
+     */
+    void handleNumberValue(byte b, int prevState, byte[] chunk, int pos) {
+        if (b == '"') {
+            /* key 的关闭引号，忽略 */
+            return;
+        }
+        if (b == ':') {
+            afterColon = true;
+            return;
+        }
+        if (isWhitespace(b)) {
+            if (!afterColon) {
+                return;
+            }
+            if (valueBuf != null) {
+                finishNumberValue();
+            }
+            return;
+        }
+        if (b == ',' || b == '}') {
+            if (valueBuf != null) {
+                finishNumberValue();
+            }
+            if (b == '}') {
+                if (inThinkingObject && depth == 2) {
+                    inThinkingObject = false;
+                }
+                depth--;
+                if (depth < 0) depth = 0;
+                if (depth == 0) {
+                    state = STATE_DONE;
+                } else {
+                    resetToNormal();
+                }
+            } else {
+                resetToNormal();
+            }
+            return;
+        }
+        if (b >= '0' && b <= '9') {
+            if (!afterColon) {
+                return;
+            }
+            if (valueBuf == null) {
+                valueBuf = new StringBuilder(16);
+            }
+            valueBuf.append((char) b);
+            return;
+        }
+        /* 非预期字符，重置 */
+        resetToNormal();
+    }
+
+    /**
+     * 完成数字 value 的解析。
+     */
+    void finishNumberValue() {
+        try {
+            int value = Integer.parseInt(valueBuf.toString());
+            if (value > 0) {
+                enableThinking = true;
+            }
+        } catch (NumberFormatException e) {
+            // ignore
+        }
+        resetToNormal();
+    }
+
+    /**
+     * 解析对象类型的 value（用于 thinking 字段）。
+     * 当值为对象时，进入 thinking 对象扫描其内部的 type 字段。
+     */
+    void handleObjectValue(byte b) {
+        if (b == '"') {
+            /* key 的关闭引号，忽略 */
+            return;
+        }
+        if (b == ':') {
+            afterColon = true;
+            return;
+        }
+        if (isWhitespace(b)) {
+            return;
+        }
+        if (b == '{' && afterColon) {
+            depth++;
+            inThinkingObject = true;
+            resetToNormal();
+            return;
+        }
+        /* 非预期字符，重置 */
+        resetToNormal();
+    }
+
+    /**
+     * 解析字符串形式的布尔值。
+     */
+    static Boolean parseBooleanString(String s) {
+        if (s == null) {
+            return null;
+        }
+        String trimmed = s.trim();
+        if ("true".equalsIgnoreCase(trimmed)) {
+            return Boolean.TRUE;
+        }
+        if ("false".equalsIgnoreCase(trimmed)) {
+            return Boolean.FALSE;
+        }
+        return null;
+    }
+
+    /**
      * 重置状态机到 NORMAL，准备扫描下一个目标字段。
      */
     void resetToNormal() {
@@ -430,6 +582,8 @@ public class StreamingForwarder {
         afterColon = false;
         inValueString = false;
         boolMatchLen = 0;
+        escapePending = false;
+        inString = false;
     }
 
     /**
@@ -437,9 +591,26 @@ public class StreamingForwarder {
      * 匹配成功返回对应的 TargetField，否则返回 null。
      * chunk 数据不足时返回 null（等下个 chunk 再试）。
      */
-    static TargetField findMatchingTarget(byte[] chunk, int offset) {
+    static TargetField findMatchingTarget(byte[] chunk, int offset, int depth, boolean inThinkingObject) {
         for (TargetField target : ALL_TARGETS) {
-            if (matchesKey(chunk, offset, target.keyBytes())) {
+            if (target.nestedOnly()) {
+                if (!(inThinkingObject && depth == 2)) {
+                    continue;
+                }
+            } else {
+                if (depth != 1) {
+                    continue;
+                }
+            }
+            byte[] key = target.keyBytes();
+            /* 必须能在当前 chunk 中看到 key 之后的关闭引号，避免 "thinking" 前缀误匹配 "thinking_budget_tokens" */
+            if (offset + key.length >= chunk.length) {
+                continue;
+            }
+            if (chunk[offset + key.length] != '"') {
+                continue;
+            }
+            if (matchesKey(chunk, offset, key)) {
                 return target;
             }
         }
@@ -507,23 +678,30 @@ public class StreamingForwarder {
         private final String name;
         private final FieldType type;
         private final byte[] keyBytes;
+        private final boolean nestedOnly;
 
         TargetField(String name, FieldType type) {
+            this(name, type, false);
+        }
+
+        TargetField(String name, FieldType type, boolean nestedOnly) {
             this.name = name;
             this.type = type;
             this.keyBytes = name.getBytes(StandardCharsets.US_ASCII);
+            this.nestedOnly = nestedOnly;
         }
 
         String name() { return name; }
         FieldType type() { return type; }
         byte[] keyBytes() { return keyBytes; }
+        boolean nestedOnly() { return nestedOnly; }
     }
 
     /**
      * 字段类型。
      */
     enum FieldType {
-        STRING, BOOLEAN
+        STRING, BOOLEAN, NUMBER, OBJECT
     }
 
     public static class TransformResult {
