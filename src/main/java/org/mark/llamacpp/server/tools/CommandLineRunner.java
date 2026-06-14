@@ -261,7 +261,7 @@ public class CommandLineRunner {
 		t.join(unit.toMillis(timeout));
 	}
 
-	private static void destroyProcessTree(Process process) {
+	public static void destroyProcessTree(Process process) {
 		if (process == null) {
 			return;
 		}
@@ -306,7 +306,7 @@ public class CommandLineRunner {
 		}
 	}
 
-	private static void applyExecutableDirEnv(ProcessBuilder pb, String[] commandArray) {
+	public static void applyExecutableDirEnv(ProcessBuilder pb, String[] commandArray) {
 		if (pb == null || commandArray == null || commandArray.length == 0) {
 			return;
 		}
@@ -982,7 +982,7 @@ public class CommandLineRunner {
 		}
 	}
 
-	private static List<String> splitCommandLineArgs(String commandLine) {
+	public static List<String> splitCommandLineArgs(String commandLine) {
 		List<String> out = new ArrayList<>();
 		if (commandLine == null) {
 			return out;

@@ -19,6 +19,7 @@ import org.mark.llamacpp.server.controller.ModelActionController;
 import org.mark.llamacpp.server.controller.ModelInfoController;
 import org.mark.llamacpp.server.controller.ModelPathController;
 import org.mark.llamacpp.server.controller.NodeController;
+import org.mark.llamacpp.server.controller.PerplexityController;
 import org.mark.llamacpp.server.controller.ProxyController;
 import org.mark.llamacpp.server.controller.ParamController;
 import org.mark.llamacpp.server.controller.SystemController;
@@ -59,6 +60,7 @@ public class BasicRouterHandler extends SimpleChannelInboundHandler<FullHttpRequ
 		pipeline.add(new HuggingFaceController());
 		pipeline.add(new LlamacppController());
 		pipeline.add(new ModelActionController());
+		pipeline.add(new PerplexityController());
 		pipeline.add(new ModelInfoController());
 		pipeline.add(new ModelPathController());
 		pipeline.add(new NodeController());

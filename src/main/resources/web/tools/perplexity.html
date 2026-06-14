@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title data-i18n="page.tools.perplexity.title">困惑度测试</title>
+  <link rel="stylesheet" href="../css/all.min.css" />
+  <link href="../css/css2.css" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/index.css" />
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; background: var(--bg-color); color: var(--text-primary); font-family: "Microsoft YaHei", "Inter", sans-serif; }
+    .page { position: fixed; inset: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .top { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--border-color); background: linear-gradient(135deg, rgba(255,255,255,0.06), rgba(255,255,255,0)) var(--sidebar-bg); flex-shrink: 0; flex-wrap: wrap; }
+    .top .title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 800; margin: 0; }
+    .content { flex: 1 1 0; min-height: 0; padding: 12px 18px; display: grid; grid-template-columns: 320px 1fr; gap: 12px; overflow: hidden; }
+    .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.06); min-height: 0; }
+    .card.stretch { flex: 1 1 0; overflow: hidden; }
+    .left-col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+    .row { display: flex; flex-direction: column; gap: 4px; }
+    .row label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+    .form-control { width: 100%; padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px; font-family: inherit; background: var(--card-bg); color: var(--text-primary); box-sizing: border-box; }
+    .form-control:focus { outline: none; border-color: rgba(99,102,241,0.5); }
+    .form-control:disabled { opacity: 0.5; cursor: not-allowed; background: var(--disabled-bg); }
+    .model-menu { display: flex; flex-direction: column; gap: 4px; overflow: auto; flex: 1 1 0; min-height: 0; padding: 2px 0; }
+    .model-menu-item { width: 100%; display: grid; grid-template-columns: 1fr; gap: 2px; border: 1px solid var(--border-color); border-left: 3px solid transparent; border-radius: 8px; padding: 7px 10px; background: rgba(255,255,255,0.02); color: var(--text-primary); cursor: pointer; text-align: left; font-family: inherit; font-size: 12px; transition: all 0.15s; }
+    .model-menu-item:hover { border-color: rgba(99,102,241,0.45); background: rgba(99,102,241,0.08); }
+    .model-menu-item.active { border-color: rgba(99,102,241,0.75); background: rgba(99,102,241,0.14); }
+    .model-menu-item .name { font-weight: 700; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .model-menu-item .meta { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; flex-shrink: 0; }
+    .hint { color: var(--text-secondary); font-size: 12px; }
+    .section-title { font-size: 13px; font-weight: 700; flex-shrink: 0; display: flex; align-items: center; gap: 6px; }
+    .section-title i { color: var(--primary-color); }
+    .warning-box { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.4); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: #b45309; }
+    [data-theme="dark"] .warning-box { background: rgba(245,158,11,0.12); color: #fbbf24; }
+    .log-area { flex: 1 1 0; min-height: 0; overflow: auto; background: rgba(0,0,0,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    [data-theme="dark"] .log-area { background: rgba(0,0,0,0.15); }
+    .log-line { margin: 0; padding: 1px 0; }
+    .log-line.error { color: var(--danger-color); }
+    .result-card { background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.3); border-radius: 8px; padding: 10px 12px; display: none; }
+    .result-card.visible { display: block; }
+    .result-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 8px; }
+    .result-item { display: flex; flex-direction: column; gap: 2px; }
+    .result-item .label { font-size: 11px; color: var(--text-secondary); }
+    .result-item .value { font-size: 14px; font-weight: 700; color: var(--primary-color); }
+    .progress-bar { width: 100%; height: 4px; background: var(--border-color); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+    .progress-bar .fill { height: 100%; background: var(--primary-color); border-radius: 2px; transition: width 0.3s; }
+    @media (max-width: 960px) { .content { grid-template-columns: 1fr; overflow: auto; } .page { position: relative; inset: auto; height: 100vh; } }
+  </style>
+</head>
+<body>
+<div class="page">
+  <div class="top">
+    <h1 class="title"><i class="fas fa-wave-square"></i> <span data-i18n="page.tools.perplexity.title">困惑度测试</span></h1>
+    <div class="actions" style="margin-left:auto;">
+      <button id="runBtn" class="btn btn-primary" data-i18n="page.tools.perplexity.action.run">开始测试</button>
+      <button id="cancelBtn" class="btn btn-danger" disabled data-i18n="page.tools.perplexity.action.cancel">取消测试</button>
+      <button id="clearBtn" class="btn btn-secondary" data-i18n="page.tools.perplexity.action.clear_log">清空日志</button>
+      <button id="copyCmdBtn" class="btn btn-secondary" data-i18n="page.tools.perplexity.action.copy_command">复制命令</button>
+    </div>
+  </div>
+  <div class="content">
+    <div class="left-col">
+      <div class="card" style="flex-shrink:0;">
+        <div class="section-title"><i class="fas fa-sliders-h"></i> <span data-i18n="page.tools.perplexity.section.params">参数</span></div>
+        <div class="row">
+          <label data-i18n="page.tools.perplexity.label.llama_bin">llama.cpp 目录</label>
+          <select id="llamaBinSelect" class="form-control"></select>
+        </div>
+        <div class="row">
+          <label data-i18n="page.tools.perplexity.label.ctx_size">上下文大小 (ctx-size)</label>
+          <input id="ctxSizeInput" type="number" class="form-control" value="512" min="1" />
+        </div>
+        <div class="row">
+          <label data-i18n="page.tools.perplexity.label.ngl">GPU 层数 (n-gpu-layers)</label>
+          <input id="nglInput" type="number" class="form-control" value="0" min="-1" />
+        </div>
+        <div class="row">
+          <label data-i18n="page.tools.perplexity.label.ppl_stride">PPL 步长 (ppl-stride)</label>
+          <input id="pplStrideInput" type="number" class="form-control" value="0" min="0" />
+        </div>
+        <div class="row">
+          <label data-i18n="page.tools.perplexity.label.extra_params">额外参数</label>
+          <input id="extraParamsInput" type="text" class="form-control" placeholder="例如: -ctk q8_0 -ctv q8_0" data-i18n-attr="placeholder" data-i18n="page.tools.perplexity.placeholder.extra_params" />
+        </div>
+      </div>
+      <div class="card stretch">
+        <div class="section-title"><i class="fas fa-robot"></i> <span data-i18n="page.tools.perplexity.section.models">模型</span></div>
+        <input id="modelSearchInput" type="text" class="form-control" placeholder="搜索…" data-i18n-attr="placeholder" data-i18n="page.tools.perplexity.placeholder.search" />
+        <div id="modelList" class="model-menu"></div>
+      </div>
+      <div class="warning-box" data-i18n="page.tools.perplexity.hint.resource_warning">
+        困惑度测试会完整加载模型到内存/显存，请确保计算机资源充足。测试过程中关闭页面或点击“取消”会立即终止测试。
+      </div>
+    </div>
+    <div class="right-col" style="display:flex; flex-direction:column; gap:12px; min-height:0; overflow:hidden;">
+      <div class="card stretch" style="overflow:hidden;">
+        <div class="section-title"><i class="fas fa-terminal"></i> <span data-i18n="page.tools.perplexity.section.output">输出</span> <span id="statusText" class="hint" style="margin-left:auto;"></span></div>
+        <div id="progressWrap" class="progress-bar" style="display:none;"><div class="fill" id="progressFill" style="width:0%"></div></div>
+        <div class="actions" style="flex-shrink:0;">
+          <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
+            <input id="autoScrollCheckbox" type="checkbox" checked /> <span data-i18n="page.tools.perplexity.label.auto_scroll">自动滚动</span>
+          </label>
+        </div>
+        <div id="logArea" class="log-area"><div class="log-line hint" data-i18n="page.tools.perplexity.empty.ready">请选择模型并点击“开始测试”</div></div>
+      </div>
+      <div id="resultCard" class="result-card">
+        <div class="section-title"><i class="fas fa-check-circle"></i> <span data-i18n="page.tools.perplexity.section.result">最终结果</span></div>
+        <div class="result-grid">
+          <div class="result-item"><span class="label" data-i18n="page.tools.perplexity.result.ppl">PPL</span><span class="value" id="resultPpl">--</span></div>
+          <div class="result-item"><span class="label" data-i18n="page.tools.perplexity.result.uncertainty">标准误差</span><span class="value" id="resultUncertainty">--</span></div>
+          <div class="result-item"><span class="label" data-i18n="page.tools.perplexity.result.exit_code">退出码</span><span class="value" id="resultExitCode">--</span></div>
+          <div class="result-item"><span class="label" data-i18n="page.tools.perplexity.result.elapsed">耗时</span><span class="value" id="resultElapsed">--</span></div>
+        </div>
+        <div class="result-item" style="margin-top:8px;"><span class="label" data-i18n="page.tools.perplexity.result.saved_path">保存路径</span><span class="value" id="resultSavedPath" style="font-size:11px; word-break:break-all;">--</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="/js/i18n.js"></script>
+<script>
+(function() {
+  const els = {
+    modelList: document.getElementById('modelList'),
+    modelSearchInput: document.getElementById('modelSearchInput'),
+    llamaBinSelect: document.getElementById('llamaBinSelect'),
+    ctxSizeInput: document.getElementById('ctxSizeInput'),
+    nglInput: document.getElementById('nglInput'),
+    pplStrideInput: document.getElementById('pplStrideInput'),
+    extraParamsInput: document.getElementById('extraParamsInput'),
+    runBtn: document.getElementById('runBtn'),
+    cancelBtn: document.getElementById('cancelBtn'),
+    clearBtn: document.getElementById('clearBtn'),
+    copyCmdBtn: document.getElementById('copyCmdBtn'),
+    statusText: document.getElementById('statusText'),
+    progressWrap: document.getElementById('progressWrap'),
+    progressFill: document.getElementById('progressFill'),
+    logArea: document.getElementById('logArea'),
+    autoScrollCheckbox: document.getElementById('autoScrollCheckbox'),
+    resultCard: document.getElementById('resultCard'),
+    resultPpl: document.getElementById('resultPpl'),
+    resultUncertainty: document.getElementById('resultUncertainty'),
+    resultExitCode: document.getElementById('resultExitCode'),
+    resultElapsed: document.getElementById('resultElapsed'),
+    resultSavedPath: document.getElementById('resultSavedPath'),
+  };
+
+  let allModels = [];
+  let selectedModelId = '';
+  let abortController = null;
+  let isRunning = false;
+  let lastCommand = [];
+
+  function t(key, fallback) {
+    if (window.I18N && typeof window.I18N.t === 'function') {
+      return window.I18N.t(key, fallback);
+    }
+    return fallback != null ? fallback : key;
+  }
+
+  async function fetchJson(url, options) {
+    const resp = await fetch(url, options);
+    const text = await resp.text();
+    let json;
+    try { json = JSON.parse(text); } catch (e) { json = { success: false, error: text || '请求失败' }; }
+    if (!resp.ok) throw new Error((json && json.error) ? json.error : '请求失败');
+    return json;
+  }
+
+  function formatBytes(bytes) {
+    if (bytes == null || bytes < 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+
+  function renderModelList() {
+    const filter = (els.modelSearchInput.value || '').toLowerCase();
+    els.modelList.innerHTML = '';
+    const models = allModels.filter(m => {
+      if (!m || m.nodeId !== 'local') return false;
+      if (!filter) return true;
+      const text = ((m.name || '') + ' ' + (m.id || '') + ' ' + (m.quantization || '')).toLowerCase();
+      return text.includes(filter);
+    });
+    if (!models.length) {
+      const div = document.createElement('div');
+      div.className = 'hint';
+      div.style.padding = '10px';
+      div.textContent = t('page.tools.perplexity.empty.no_models', '暂无可用模型');
+      els.modelList.appendChild(div);
+      return;
+    }
+    models.forEach(m => {
+      const btn = document.createElement('button');
+      btn.className = 'model-menu-item' + (m.id === selectedModelId ? ' active' : '');
+      btn.dataset.modelId = m.id;
+      btn.innerHTML = `<div class="name">${escapeHtml(m.name || m.id)}</div><div class="meta">${escapeHtml((m.quantization || '') + ' · ' + formatBytes(m.size))}</div>`;
+      btn.addEventListener('click', () => selectModel(m.id));
+      els.modelList.appendChild(btn);
+    });
+  }
+
+  function selectModel(id) {
+    selectedModelId = id;
+    renderModelList();
+    setStatus(t('page.tools.perplexity.status.ready', '就绪'));
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  async function loadModels() {
+    try {
+      const data = await fetchJson('/api/models/list', { method: 'GET' });
+      allModels = (data && data.success && Array.isArray(data.models)) ? data.models : [];
+      renderModelList();
+      if (allModels.length && !selectedModelId) {
+        const first = allModels.find(m => m && m.nodeId === 'local');
+        if (first) selectModel(first.id);
+      }
+    } catch (e) {
+      setStatus(t('page.tools.perplexity.status.models_load_failed', '模型列表加载失败') + ': ' + e.message);
+    }
+  }
+
+  async function loadLlamaCppDirs() {
+    try {
+      const data = await fetchJson('/api/llamacpp/list', { method: 'GET' });
+      const items = (data && data.success && data.data && Array.isArray(data.data.items)) ? data.data.items : [];
+      els.llamaBinSelect.innerHTML = '';
+      if (!items.length) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = t('page.tools.perplexity.option.no_llamacpp', '未找到 llama.cpp 目录');
+        els.llamaBinSelect.appendChild(opt);
+        return;
+      }
+      items.forEach(item => {
+        const opt = document.createElement('option');
+        opt.value = item.path || '';
+        opt.textContent = (item.name || item.path || '');
+        els.llamaBinSelect.appendChild(opt);
+      });
+    } catch (e) {
+      els.llamaBinSelect.innerHTML = '<option value="">' + t('page.tools.perplexity.option.load_failed', '加载失败') + '</option>';
+    }
+  }
+
+  function setStatus(text) {
+    els.statusText.textContent = text || '';
+  }
+
+  function clearLog() {
+    els.logArea.innerHTML = '';
+    els.resultCard.classList.remove('visible');
+    els.progressWrap.style.display = 'none';
+    els.progressFill.style.width = '0%';
+  }
+
+  function appendLog(text, type) {
+    const line = document.createElement('div');
+    line.className = 'log-line' + (type === 'error' ? ' error' : '');
+    line.textContent = text;
+    els.logArea.appendChild(line);
+    if (els.autoScrollCheckbox.checked) {
+      els.logArea.scrollTop = els.logArea.scrollHeight;
+    }
+  }
+
+  function updateProgress(text) {
+    // 粗略进度：根据输出中的 chunk 行数估计
+    const chunkMatch = text.match(/\[(\d+)\]/);
+    if (chunkMatch) {
+      const n = parseInt(chunkMatch[1], 10);
+      // 假设最多 600 个 chunk（ctx=512 时约 584）
+      const pct = Math.min(100, Math.round((n / 600) * 100));
+      els.progressFill.style.width = pct + '%';
+    }
+  }
+
+  function buildPayload() {
+    return {
+      modelId: selectedModelId,
+      llamaBinPath: els.llamaBinSelect.value,
+      ctxSize: parseInt(els.ctxSizeInput.value, 10) || 512,
+      ngl: parseInt(els.nglInput.value, 10) || 0,
+      pplStride: parseInt(els.pplStrideInput.value, 10) || 0,
+      extraParams: els.extraParamsInput.value.trim()
+    };
+  }
+
+  function validatePayload(p) {
+    if (!p.modelId) return t('page.tools.perplexity.error.select_model', '请选择模型');
+    if (!p.llamaBinPath) return t('page.tools.perplexity.error.select_llamacpp', '请选择 llama.cpp 目录');
+    if (!Number.isFinite(p.ctxSize) || p.ctxSize <= 0) return t('page.tools.perplexity.error.ctx_size_gt0', 'ctx-size 必须大于 0');
+    if (!Number.isFinite(p.ngl) || p.ngl < -1) return t('page.tools.perplexity.error.ngl_ge_minus1', 'n-gpu-layers 不能小于 -1');
+    if (!Number.isFinite(p.pplStride) || p.pplStride < 0) return t('page.tools.perplexity.error.ppl_stride_ge0', 'ppl-stride 不能小于 0');
+    return null;
+  }
+
+  async function runTest() {
+    if (isRunning) return;
+    const payload = buildPayload();
+    const err = validatePayload(payload);
+    if (err) {
+      setStatus(err);
+      return;
+    }
+    const confirmed = window.confirm(t('page.tools.perplexity.confirm.resource', '困惑度测试会完整加载模型到内存/显存，请确保资源充足。是否继续？'));
+    if (!confirmed) return;
+
+    isRunning = true;
+    abortController = new AbortController();
+    clearLog();
+    els.runBtn.disabled = true;
+    els.cancelBtn.disabled = false;
+    setStatus(t('page.tools.perplexity.status.running', '运行中…'));
+    els.progressWrap.style.display = 'block';
+
+    try {
+      const response = await fetch('/api/perplexity/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: abortController.signal
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        let msg = text;
+        try {
+          const j = JSON.parse(text);
+          msg = j.error || j.message || text;
+        } catch (e) {}
+        throw new Error(msg);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          handleStreamLine(line);
+        }
+      }
+      if (buffer.trim()) handleStreamLine(buffer);
+      setStatus(t('page.tools.perplexity.status.done', '完成'));
+    } catch (e) {
+      if (e && e.name === 'AbortError') {
+        setStatus(t('page.tools.perplexity.status.cancelled', '已取消'));
+      } else {
+        setStatus((e && e.message) ? e.message : t('page.tools.perplexity.status.error', '出错'));
+        appendLog(String(e && e.message ? e.message : e), 'error');
+      }
+    } finally {
+      isRunning = false;
+      abortController = null;
+      els.runBtn.disabled = false;
+      els.cancelBtn.disabled = true;
+      els.progressWrap.style.display = 'none';
+    }
+  }
+
+  function handleStreamLine(line) {
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch (e) {
+      appendLog(line);
+      return;
+    }
+    if (!msg || !msg.type) {
+      appendLog(line);
+      return;
+    }
+    if (msg.type === 'line') {
+      appendLog(msg.text || '');
+      updateProgress(msg.text || '');
+    } else if (msg.type === 'error') {
+      appendLog(msg.text || '', 'error');
+    } else if (msg.type === 'started') {
+      lastCommand = Array.isArray(msg.command) ? msg.command : [];
+      appendLog(t('page.tools.perplexity.status.started_command', '命令:') + ' ' + lastCommand.join(' '));
+    } else if (msg.type === 'final') {
+      showFinalResult(msg);
+    }
+  }
+
+  function showFinalResult(data) {
+    els.resultCard.classList.add('visible');
+    els.resultPpl.textContent = data.ppl != null ? Number(data.ppl).toFixed(4) : '--';
+    els.resultUncertainty.textContent = data.uncertainty != null ? Number(data.uncertainty).toFixed(5) : '--';
+    els.resultExitCode.textContent = data.exitCode != null ? String(data.exitCode) : '--';
+    els.resultElapsed.textContent = data.elapsedMs != null ? (data.elapsedMs / 1000).toFixed(1) + 's' : '--';
+    els.resultSavedPath.textContent = data.savedPath || '--';
+  }
+
+  function cancelTest() {
+    if (abortController) {
+      abortController.abort();
+    }
+  }
+
+  async function copyCommand() {
+    const cmd = lastCommand.join(' ');
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setStatus(t('page.tools.perplexity.status.copied', '命令已复制'));
+    } catch (e) {
+      setStatus(t('page.tools.perplexity.status.copy_failed', '复制失败'));
+    }
+  }
+
+  function initEvents() {
+    els.runBtn.addEventListener('click', runTest);
+    els.cancelBtn.addEventListener('click', cancelTest);
+    els.clearBtn.addEventListener('click', clearLog);
+    els.copyCmdBtn.addEventListener('click', copyCommand);
+    els.modelSearchInput.addEventListener('input', renderModelList);
+  }
+
+  function init() {
+    initEvents();
+    loadModels();
+    loadLlamaCppDirs();
+    setStatus(t('page.tools.perplexity.status.ready', '就绪'));
+  }
+
+  if (window.I18N) {
+    init();
+  } else {
+    window.addEventListener('i18n:ready', init, { once: true });
+  }
+})();
+</script>
+</body>
+</html>
