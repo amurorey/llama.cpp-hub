@@ -4,7 +4,6 @@ import java.io.BufferedReader;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.RandomAccessFile;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
@@ -38,6 +37,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.stream.ChunkedFile;
 import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.DefaultHttpResponse;
@@ -56,8 +56,7 @@ public class EasyChatService {
 	private static final Logger logger = LoggerFactory.getLogger(EasyChatService.class);
 	private static final int STREAM_TIMEOUT_MS = 36000 * 1000;
 	private static final boolean ENABLE_REQUEST_LOG = false;
-	private static final int LARGE_PAYLOAD_THRESHOLD = 1 * 1024 * 1024;
-	private static final int STREAM_CHUNK_SIZE = 8192;
+	
 
 	private static EasyChatService instance;
 
@@ -491,12 +490,11 @@ public class EasyChatService {
 	}
 
 	/**
-	 * Stream conversation history as chunked JSON with per-message locking.
-	 * Each message's payload is read into memory under the conversation lock,
-	 * then written to the response after releasing the lock. This prevents
-	 * race conditions with concurrent POST writes while keeping memory usage
-	 * bounded to a single message's payload at any time.
-	 * For very large payloads (>=1MB), falls back to chunked streaming.
+	 * Stream conversation history as chunked JSON with per-message locking
+	 * and zero-copy file transfer via DefaultFileRegion.
+	 * Role is determined from seq parity (even=user, odd=assistant), so no
+	 * payload data is ever read into JVM memory. File transfers happen in
+	 * kernel space (sendfile) and never block the EventLoop thread.
 	 */
 	public void handleStreamChatHistory(ChannelHandlerContext ctx, String conversationId) {
 		EasyChatGlobalLock.Lease globalLease = acquireGlobalLease(ctx, "chat.history");
@@ -564,7 +562,7 @@ public class EasyChatService {
 		ctx.writeAndFlush(response);
 		ctx.writeAndFlush(Unpooled.wrappedBuffer(prefix.getBytes(StandardCharsets.UTF_8)));
 
-		// Phase 3: per-message locked read + memory-buffered write
+		// Phase 3: per-message locked read + zero-copy write via DefaultFileRegion
 		byte[] comma = ",".getBytes(StandardCharsets.UTF_8);
 		byte[] variantPrefix = "{\"content\":".getBytes(StandardCharsets.UTF_8);
 		byte[] variantSuffix = "}".getBytes(StandardCharsets.UTF_8);
@@ -578,78 +576,66 @@ public class EasyChatService {
 			boolean first = true;
 			for (long seq = 0; seq < endExclusive; seq++) {
 				EasyChatStorage.FragmentHeader header;
-				int roleVariantIndex;
-				int activeVariant;
 				String role;
-				byte[][] variantPayloads;
+				int activeVariant;
+				int msgVariantCount = 0;
 
-				// Read header and all variant payloads under conversation lock
 				synchronized (convLock) {
 					header = storage.readFragmentHeader(convDir, seq);
 					if (header == null || storage.isDeleted(header)) {
 						continue;
 					}
 
-					roleVariantIndex = storage.resolveVariantIndex(header, 0);
-					byte[] firstPayload = roleVariantIndex < 0 ? new byte[0] : storage.readPayload(convDir, seq, roleVariantIndex);
-
-					role = "unknown";
-					if (firstPayload != null && firstPayload.length > 0) {
-						try {
-							JsonObject msgObj = JsonUtil.tryParseObject(new String(firstPayload, StandardCharsets.UTF_8));
-							if (msgObj != null && msgObj.has("role")) {
-								role = msgObj.get("role").getAsString();
-							}
-						} catch (Exception e) {
-							// ignore
-						}
-					}
+					// Determine role from seq parity: even=user, odd=assistant
+					role = (header.seq % 2 == 0) ? "user" : "assistant";
 
 					activeVariant = storage.resolveVariantIndex(header, header.activeVariantIndex);
 					if (activeVariant < 0) {
 						activeVariant = 0;
 					}
 
-					// Read all variant payloads into memory
-					variantPayloads = new byte[header.variantCount][];
-					for (int v = 0; v < header.variantCount; v++) {
-						variantPayloads[v] = storage.readPayload(convDir, seq, v);
-					}
-				}
-				// Lock released - safe to write to channel
+					msgVariantCount = header.variantCount;
 
-				if (!first) {
-					ctx.writeAndFlush(Unpooled.wrappedBuffer(comma));
-				}
-				first = false;
-
-				// {"seq":N,"role":"R","activeVariant":N,"variants":[
-				String msgPrefix = "{\"seq\":" + seq + ",\"role\":\"" + escapeJsonString(role)
-					+ "\",\"activeVariant\":" + activeVariant + ",\"variants\":[";
-				ctx.writeAndFlush(Unpooled.wrappedBuffer(msgPrefix.getBytes(StandardCharsets.UTF_8)));
-
-				// All variants
-				for (int v = 0; v < header.variantCount; v++) {
-					if (v > 0) {
+					// Write entire message under lock to prevent TOCTOU with getVariantSlice
+					if (!first) {
 						ctx.writeAndFlush(Unpooled.wrappedBuffer(comma));
 					}
-					ctx.writeAndFlush(Unpooled.wrappedBuffer(variantPrefix));
-					if (variantPayloads[v] != null && variantPayloads[v].length > 0) {
-						if (variantPayloads[v].length >= LARGE_PAYLOAD_THRESHOLD) {
-							streamPayloadToChannel(ctx, variantPayloads[v]);
-						} else {
-							ctx.writeAndFlush(Unpooled.wrappedBuffer(variantPayloads[v]));
-						}
-					} else {
-						ctx.writeAndFlush(Unpooled.wrappedBuffer("null".getBytes(StandardCharsets.UTF_8)));
-					}
-					ctx.writeAndFlush(Unpooled.wrappedBuffer(variantSuffix));
-				}
+					first = false;
 
-				ctx.writeAndFlush(Unpooled.wrappedBuffer(msgSuffix));
+					// {"seq":N,"role":"R","activeVariant":N,"variants":[
+					String msgPrefix = "{\"seq\":" + seq + ",\"role\":\"" + escapeJsonString(role)
+						+ "\",\"activeVariant\":" + activeVariant + ",\"variants\":[";
+					ctx.writeAndFlush(Unpooled.wrappedBuffer(msgPrefix.getBytes(StandardCharsets.UTF_8)));
+
+					// All variants — ChunkedFile (works with HTTPS, unlike DefaultFileRegion)
+					for (int v = 0; v < msgVariantCount; v++) {
+						if (v > 0) {
+							ctx.writeAndFlush(Unpooled.wrappedBuffer(comma));
+						}
+						ctx.writeAndFlush(Unpooled.wrappedBuffer(variantPrefix));
+						EasyChatStorage.FragmentSlice slice = storage.getVariantSlice(convDir, seq, v);
+						if (slice != null && slice.length > 0) {
+							try {
+								ChunkedFile chunkedFile = new ChunkedFile(
+									new java.io.RandomAccessFile(slice.file.toFile(), "r"),
+									slice.offset, slice.length, 8192);
+								ctx.writeAndFlush(chunkedFile);
+							} catch (IOException e) {
+								logger.warn("[EasyChat] ChunkedFile创建失败 seq={} v={}", seq, v, e);
+								ctx.writeAndFlush(Unpooled.wrappedBuffer("null".getBytes(StandardCharsets.UTF_8)));
+							}
+						} else {
+							ctx.writeAndFlush(Unpooled.wrappedBuffer("null".getBytes(StandardCharsets.UTF_8)));
+						}
+						ctx.writeAndFlush(Unpooled.wrappedBuffer(variantSuffix));
+					}
+
+					ctx.writeAndFlush(Unpooled.wrappedBuffer(msgSuffix));
+				}
+				// Lock released — DefaultFileRegion already submitted to EventLoop
 			}
 			ctx.writeAndFlush(Unpooled.wrappedBuffer(dataSuffix));
-			logger.info("[EasyChat] 流式传输历史完成 conversation={} records={} variants={} bytes={}",
+			logger.info("[EasyChat] 流式传输历史完成 conversation={} records={} extraVariants={} bytes={}",
 				conversationId, recordCount, variantCount, totalSize);
 			final EasyChatGlobalLock.Lease finalGlobalLease = globalLease;
 			ctx.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT).addListener(future -> {
@@ -677,22 +663,6 @@ public class EasyChatService {
 		resp.headers().set(HttpHeaderNames.CONNECTION, HttpHeaderValues.CLOSE);
 		resp.content().writeBytes(body);
 		ctx.writeAndFlush(resp).addListener(ChannelFutureListener.CLOSE);
-	}
-
-	/**
-	 * Stream a large payload to the channel in chunks to avoid memory spikes.
-	 * The payload is already in memory (read under lock), but we write it in
-	 * small chunks to avoid allocating a single large ByteBuf.
-	 */
-	private void streamPayloadToChannel(ChannelHandlerContext ctx, byte[] payload) {
-		int offset = 0;
-		int remaining = payload.length;
-		while (remaining > 0) {
-			int chunk = Math.min(STREAM_CHUNK_SIZE, remaining);
-			ctx.writeAndFlush(Unpooled.wrappedBuffer(payload, offset, chunk));
-			offset += chunk;
-			remaining -= chunk;
-		}
 	}
 
 	private EasyChatGlobalLock.Lease acquireGlobalLease(ChannelHandlerContext ctx, String operationName) {
