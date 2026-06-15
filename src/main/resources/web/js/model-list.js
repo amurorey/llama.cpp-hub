@@ -329,27 +329,36 @@ function sortAndRenderModels() {
     const comparator = getModelSortComparator(sortType);
     const all = [...filtered];
 
-    const loadedFav = [];
-    const loadedNonFav = [];
-    const nonLoadedFav = [];
-    const nonLoadedNonFav = [];
-    all.forEach(m => {
-        if (!m) return;
-        if (m.isLoaded) {
-            if (m.favourite) loadedFav.push(m);
-            else loadedNonFav.push(m);
-        } else {
-            if (m.favourite) nonLoadedFav.push(m);
-            else nonLoadedNonFav.push(m);
-        }
-    });
-
-    loadedFav.sort(comparator);
-    loadedNonFav.sort(comparator);
-    nonLoadedFav.sort(comparator);
-    nonLoadedNonFav.sort(comparator);
-
-    renderModelsList([...loadedFav, ...loadedNonFav, ...nonLoadedFav, ...nonLoadedNonFav]);
+    if (getRunningFirst()) {
+        const loaded = [];
+        const nonLoadedFav = [];
+        const nonLoadedNonFav = [];
+        all.forEach(m => {
+            if (!m) return;
+            if (m.isLoaded) {
+                loaded.push(m);
+            } else if (m.favourite) {
+                nonLoadedFav.push(m);
+            } else {
+                nonLoadedNonFav.push(m);
+            }
+        });
+        loaded.sort(comparator);
+        nonLoadedFav.sort(comparator);
+        nonLoadedNonFav.sort(comparator);
+        renderModelsList([...loaded, ...nonLoadedFav, ...nonLoadedNonFav]);
+    } else {
+        const fav = [];
+        const nonFav = [];
+        all.forEach(m => {
+            if (!m) return;
+            if (m.favourite) fav.push(m);
+            else nonFav.push(m);
+        });
+        fav.sort(comparator);
+        nonFav.sort(comparator);
+        renderModelsList([...fav, ...nonFav]);
+    }
 }
 
 function getModelSortComparator(sortType) {
@@ -630,6 +639,36 @@ function applyModelView() {
         if (icon) {
             icon.className = view === 'grid' ? 'fas fa-list' : 'fas fa-th-large';
         }
+    }
+}
+
+function getRunningFirst() {
+    try {
+        const val = localStorage.getItem('runningFirst');
+        if (val === null) return true;
+        return val === 'true';
+    } catch (e) {
+        return true;
+    }
+}
+
+function setRunningFirst(val) {
+    try {
+        localStorage.setItem('runningFirst', String(val));
+    } catch (e) {}
+}
+
+function toggleRunningFirst() {
+    const next = !getRunningFirst();
+    setRunningFirst(next);
+    applyRunningFirstUI();
+    sortAndRenderModels();
+}
+
+function applyRunningFirstUI() {
+    const btn = document.getElementById('runningFirstToggle');
+    if (btn) {
+        btn.classList.toggle('active', getRunningFirst());
     }
 }
 

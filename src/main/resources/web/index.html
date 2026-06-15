@@ -2380,6 +2380,11 @@
                             <option value="params_desc" data-i18n="page.model.sort.params_desc">
                                 page.model.sort.params_desc</option>
                         </select>
+                        <button id="runningFirstToggle" class="btn-icon active" style="width:36px;height:36px;"
+                            title="page.model.sort.running_first" data-i18n="page.model.sort.running_first" data-i18n-attr="title"
+                            onclick="toggleRunningFirst()">
+                            <i class="fas fa-bolt"></i>
+                        </button>
                         <button id="modelViewToggle" class="btn-icon" style="width:36px;height:36px;"
                             title="Toggle view" onclick="toggleModelView()">
                             <i class="fas fa-th-large"></i>
@@ -4422,6 +4427,7 @@
             loadBuildInfo();
             updateChatCompletionLinkForDevice();
             applyModelView();
+            applyRunningFirstUI();
         });
 
         window.addEventListener('i18n:ready', function (e) {

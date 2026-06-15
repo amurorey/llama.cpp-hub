@@ -650,6 +650,7 @@
   "page.model.sort.params_desc": "参数量 ↓",
   "page.model.sort.size_asc": "大小 ↑",
   "page.model.sort.size_desc": "大小 ↓",
+  "page.model.sort.running_first": "运行优先",
   "page.model.stats.loaded": "已加载",
   "page.model.stats.total": "总数",
   "page.model.title": "模型列表",
