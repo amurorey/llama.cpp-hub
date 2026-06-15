@@ -66,11 +66,15 @@ public class CertController implements BaseController {
             String keystorePath = LlamaServer.getHttpsCertPath();
             Path path = Paths.get(keystorePath).toAbsolutePath().normalize();
             boolean exists = Files.exists(path) && Files.isRegularFile(path);
+            Path caCertPath = Paths.get("ssl", "ca-cert.cer").toAbsolutePath().normalize();
+            boolean caExists = Files.exists(caCertPath) && Files.isRegularFile(caCertPath);
 
             Map<String, Object> data = new HashMap<>();
             data.put("exists", exists);
             data.put("path", keystorePath);
             data.put("password", LlamaServer.getHttpsPassword());
+            data.put("caCertPath", caCertPath.toString());
+            data.put("caCertExists", caExists);
             if (exists) {
                 try {
                     data.put("size", Files.size(path));
@@ -92,20 +96,45 @@ public class CertController implements BaseController {
             return;
         }
         try {
-            String keystorePath = LlamaServer.getHttpsCertPath();
-            Path filePath = Paths.get(keystorePath).toAbsolutePath().normalize();
+            String query = request.uri();
+            int qIdx = query.indexOf('?');
+            String type = "";
+            if (qIdx >= 0) {
+                String[] pairs = query.substring(qIdx + 1).split("&");
+                for (String pair : pairs) {
+                    int eq = pair.indexOf('=');
+                    if (eq > 0 && "type".equals(pair.substring(0, eq))) {
+                        type = pair.substring(eq + 1);
+                        break;
+                    }
+                }
+            }
+
+            Path filePath;
+            String contentType;
+            String fileName;
+            if ("ca".equalsIgnoreCase(type)) {
+                filePath = Paths.get("ssl", "ca-cert.cer").toAbsolutePath().normalize();
+                contentType = "application/x-x509-ca-cert";
+                fileName = "ca-cert.cer";
+            } else {
+                String keystorePath = LlamaServer.getHttpsCertPath();
+                filePath = Paths.get(keystorePath).toAbsolutePath().normalize();
+                contentType = "application/x-pkcs12";
+                fileName = filePath.getFileName() == null ? "keystore.p12" : filePath.getFileName().toString();
+            }
+
             if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
                 LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.NOT_FOUND, "证书文件不存在");
                 return;
             }
 
-            String fileName = filePath.getFileName() == null ? "keystore.p12" : filePath.getFileName().toString();
             long fileLength = Files.size(filePath);
             RandomAccessFile raf = new RandomAccessFile(filePath.toFile(), "r");
 
             HttpResponse response = new DefaultHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK);
             response.headers().set(HttpHeaderNames.CONTENT_LENGTH, fileLength);
-            response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/x-pkcs12");
+            response.headers().set(HttpHeaderNames.CONTENT_TYPE, contentType);
             response.headers().set(HttpHeaderNames.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"");
             LlamaServer.setCorsHeaders(response.headers());
 
@@ -161,7 +190,33 @@ public class CertController implements BaseController {
 
             Path outputPath = Paths.get(outputDir);
             Files.createDirectories(outputPath);
-            String keystoreFile = outputPath.resolve("keystore.p12").toString();
+            Path keystoreFile = outputPath.resolve("keystore.p12");
+            Path caCertFile = outputPath.resolve("ca-cert.cer");
+            Path caKeystore = outputPath.resolve("ca-keystore-temp.p12");
+            Path serverCsr = outputPath.resolve("server.csr");
+            Path serverSigned = outputPath.resolve("server-signed.cer");
+            Path caCertTemp = outputPath.resolve("ca-cert-temp.cer");
+
+            // 清理旧文件
+            try {
+                Files.deleteIfExists(keystoreFile);
+                Files.deleteIfExists(caCertFile);
+                Files.deleteIfExists(caKeystore);
+                Files.deleteIfExists(serverCsr);
+                Files.deleteIfExists(serverSigned);
+                Files.deleteIfExists(caCertTemp);
+            } catch (IOException e) {
+                logger.warn("清理旧证书文件失败", e);
+            }
+
+            String cn = userCn;
+            String caDname = "CN=" + cn + "-CA,OU=llamacpp-hub,O=llamacpp-hub,L=Unknown,ST=Unknown,C=CN";
+            String serverDname = "CN=" + cn + ",OU=llamacpp-hub,O=llamacpp-hub,L=Unknown,ST=Unknown,C=CN";
+
+            String javaHome = System.getProperty("java.home");
+            boolean isWindows = System.getProperty("os.name").toLowerCase().startsWith("windows");
+            String keytoolPath = javaHome + File.separator + "bin" + File.separator
+                    + (isWindows ? "keytool.exe" : "keytool");
 
             StringBuilder sanBuilder = new StringBuilder();
             if (hostnames != null) {
@@ -191,93 +246,111 @@ public class CertController implements BaseController {
                 }
             }
 
-            String cn = userCn;
-            String dname = "CN=" + cn + ",OU=llamacpp-hub,O=llamacpp-hub,L=Unknown,ST=Unknown,C=CN";
-
-            String javaHome = System.getProperty("java.home");
-            boolean isWindows = System.getProperty("os.name").toLowerCase().startsWith("windows");
-            String keytoolPath = javaHome + File.separator + "bin" + File.separator
-                    + (isWindows ? "keytool.exe" : "keytool");
-
-            List<String> cmd = new ArrayList<>();
-            cmd.add(keytoolPath);
-            cmd.add("-genkeypair");
-            cmd.add("-alias");
-            cmd.add("server");
-            cmd.add("-keyalg");
-            cmd.add("RSA");
-            cmd.add("-keysize");
-            cmd.add(String.valueOf(keysize));
-            cmd.add("-keystore");
-            cmd.add(keystoreFile);
-            cmd.add("-storetype");
-            cmd.add("PKCS12");
-            cmd.add("-storepass");
-            cmd.add(password);
-            cmd.add("-keypass");
-            cmd.add(password);
-            cmd.add("-dname");
-            cmd.add(dname);
-            cmd.add("-validity");
-            cmd.add(String.valueOf(validity));
-            cmd.add("-ext");
-            cmd.add("SAN=" + sanBuilder.toString());
-
-            String cmdString = cmd.stream().map(s -> {
-                if (s.contains(" ") || s.contains(",") || s.contains("="))
-                    return "\"" + s + "\"";
-                return s;
-            }).collect(Collectors.joining(" "));
-            // PowerShell requires & for paths with spaces
-            if (isWindows && cmd.get(0).contains(" ")) {
-                cmdString = "& " + cmdString;
-            }
-            // 在执行之前，应该删除旧的证书
             try {
-            	Path p = outputPath.resolve("keystore.p12");
-            	if (Files.exists(p)) {
-            		logger.info("删除旧证书：{}", keystoreFile);
-                	Files.delete(p);	
-            	}
-            }catch (IOException e) {
-            	e.printStackTrace();
-			}
-            
-            logger.info("执行命令: {}", cmdString);
+                // 1. 生成 CA 根证书（含 BasicConstraints CA:true 与 keyCertSign）
+                runKeytool(keytoolPath,
+                        "-genkeypair",
+                        "-alias", "ca",
+                        "-keyalg", "RSA",
+                        "-keysize", String.valueOf(keysize),
+                        "-keystore", caKeystore.toString(),
+                        "-storetype", "PKCS12",
+                        "-storepass", password,
+                        "-keypass", password,
+                        "-dname", caDname,
+                        "-validity", String.valueOf(validity),
+                        "-ext", "bc:critical=ca:true,pathlen:1",
+                        "-ext", "ku:critical=keyCertSign,cRLSign");
 
-            ProcessBuilder pb = new ProcessBuilder(cmd);
-            pb.redirectErrorStream(true);
-            Process process = pb.start();
+                // 2. 生成服务器密钥库（自签占位证书，后续会被替换）
+                runKeytool(keytoolPath,
+                        "-genkeypair",
+                        "-alias", "server",
+                        "-keyalg", "RSA",
+                        "-keysize", String.valueOf(keysize),
+                        "-keystore", keystoreFile.toString(),
+                        "-storetype", "PKCS12",
+                        "-storepass", password,
+                        "-keypass", password,
+                        "-dname", serverDname,
+                        "-validity", String.valueOf(validity));
 
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                }
-            }
+                // 3. 为服务器生成证书签名请求 CSR
+                runKeytool(keytoolPath,
+                        "-certreq",
+                        "-alias", "server",
+                        "-keystore", keystoreFile.toString(),
+                        "-storepass", password,
+                        "-keypass", password,
+                        "-file", serverCsr.toString());
 
-            int exitCode = process.waitFor();
-            if (exitCode != 0) {
-                String err = output.toString().trim();
-                logger.error("证书生成失败, exitCode={}, 输出: {}", exitCode, err);
-                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("证书生成失败: " + err));
+                // 4. 使用 CA 签发服务器证书（含 SAN、serverAuth EKU）
+                runKeytool(keytoolPath,
+                        "-gencert",
+                        "-infile", serverCsr.toString(),
+                        "-outfile", serverSigned.toString(),
+                        "-alias", "ca",
+                        "-keystore", caKeystore.toString(),
+                        "-storepass", password,
+                        "-keypass", password,
+                        "-validity", String.valueOf(validity),
+                        "-ext", "SAN=" + sanBuilder.toString(),
+                        "-ext", "ku=digitalSignature,keyEncipherment",
+                        "-ext", "eku=serverAuth",
+                        "-rfc");
+
+                // 5. 导出 CA 公钥证书，供客户端安装到受信任根证书颁发机构
+                runKeytool(keytoolPath,
+                        "-exportcert",
+                        "-alias", "ca",
+                        "-keystore", caKeystore.toString(),
+                        "-storepass", password,
+                        "-file", caCertTemp.toString(),
+                        "-rfc");
+
+                // 6. 构建服务器证书链并导入密钥库，替换原有自签占位证书
+                String chainContent = Files.readString(caCertTemp, StandardCharsets.UTF_8);
+                String serverCertContent = Files.readString(serverSigned, StandardCharsets.UTF_8);
+                String fullChain = serverCertContent + System.lineSeparator() + chainContent;
+                Path serverChain = outputPath.resolve("server-chain.cer");
+                Files.writeString(serverChain, fullChain, StandardCharsets.UTF_8);
+
+                runKeytool(keytoolPath,
+                        "-importcert",
+                        "-alias", "server",
+                        "-file", serverChain.toString(),
+                        "-keystore", keystoreFile.toString(),
+                        "-storepass", password,
+                        "-keypass", password,
+                        "-noprompt");
+
+                // 7. 保存 CA 证书到固定位置，方便浏览器/客户端下载安装
+                Files.copy(caCertTemp, caCertFile);
+
+                // 清理临时文件
+                Files.deleteIfExists(caKeystore);
+                Files.deleteIfExists(serverCsr);
+                Files.deleteIfExists(serverSigned);
+                Files.deleteIfExists(caCertTemp);
+                Files.deleteIfExists(serverChain);
+            } catch (Exception e) {
+                logger.error("证书生成失败", e);
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("证书生成失败: " + e.getMessage()));
                 return;
             }
 
             String expireDate = LocalDate.now().plusDays(validity).format(DateTimeFormatter.ISO_LOCAL_DATE);
 
             Map<String, Object> data = new HashMap<>();
-            data.put("path", keystoreFile);
+            data.put("path", keystoreFile.toString());
+            data.put("caCertPath", caCertFile.toString());
             data.put("password", password);
             data.put("san", sanBuilder.toString());
             data.put("expireDate", expireDate);
             data.put("keysize", keysize);
-            data.put("command", cmdString);
 
-            LlamaServer.updateHttpsConfig(null, keystoreFile, null, password);
-            logger.info("HTTPS证书生成成功: {}", keystoreFile);
+            LlamaServer.updateHttpsConfig(null, keystoreFile.toString(), null, password);
+            logger.info("HTTPS证书生成成功: {}, CA证书: {}", keystoreFile, caCertFile);
             LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
 
         } catch (RequestMethodException e) {
@@ -286,6 +359,50 @@ public class CertController implements BaseController {
             logger.error("证书生成异常", e);
             LlamaServer.sendJsonResponse(ctx, ApiResponse.error("证书生成异常: " + e.getMessage()));
         }
+    }
+
+    /**
+     * 执行 keytool 命令，失败时抛出异常并附带命令输出。
+     */
+    private String runKeytool(String keytoolPath, String... args) throws Exception {
+        List<String> cmd = new ArrayList<>();
+        cmd.add(keytoolPath);
+        for (String arg : args) {
+            cmd.add(arg);
+        }
+
+        String cmdString = cmd.stream().map(s -> {
+            if (s.contains(" ") || s.contains(",") || s.contains("=") || s.contains(";"))
+                return "\"" + s + "\"";
+            return s;
+        }).collect(Collectors.joining(" "));
+
+        boolean isWindows = System.getProperty("os.name").toLowerCase().startsWith("windows");
+        if (isWindows && cmd.get(0).contains(" ")) {
+            cmdString = "& " + cmdString;
+        }
+        logger.info("执行命令: {}", cmdString);
+
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        Process process = pb.start();
+
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append("\n");
+            }
+        }
+
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            String err = output.toString().trim();
+            logger.error("keytool 执行失败, exitCode={}, 输出: {}", exitCode, err);
+            throw new RuntimeException("keytool 执行失败 (exitCode=" + exitCode + "): " + err);
+        }
+        return output.toString();
     }
 
     private static String generatePassword() {
