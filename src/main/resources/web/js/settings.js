@@ -339,11 +339,6 @@
         if (https) {
             const httpsToggle = byId('toggleHttpsEnabled');
             if (httpsToggle) httpsToggle.checked = !!https.enabled;
-            const certPath = byId('httpsCertPathInput');
-            if (certPath && https.keystorePath) certPath.value = https.keystorePath;
-            const password = byId('httpsPasswordInput');
-            if (password && https.keystorePassword) password.value = https.keystorePassword;
-            updateHttpsInputState();
             loadHttpsCertStatus();
         }
 
@@ -373,17 +368,6 @@
         const input = byId('apiKeyInput');
         if (toggle && input) {
             input.disabled = !toggle.checked;
-        }
-    }
-
-    // HTTPS toggle — enable/disable the fields
-    function updateHttpsInputState() {
-        const toggle = byId('toggleHttpsEnabled');
-        const pathInput = byId('httpsCertPathInput');
-        const passInput = byId('httpsPasswordInput');
-        if (toggle && pathInput && passInput) {
-            pathInput.disabled = !toggle.checked;
-            passInput.disabled = !toggle.checked;
         }
     }
 
@@ -459,6 +443,8 @@
             noCertState.style.display = 'block';
             hasCertState.style.display = 'none';
         }
+        const warnEl = byId('httpsCertGenWarn');
+        if (warnEl) warnEl.style.display = 'none';
     }
 
     async function saveServerPorts() {
@@ -595,12 +581,8 @@
 
     async function saveHttps() {
         const toggle = byId('toggleHttpsEnabled');
-        const certPath = byId('httpsCertPathInput');
-        const password = byId('httpsPasswordInput');
         const payload = {};
         if (toggle) payload.httpsEnabled = toggle.checked;
-        if (certPath && certPath.value) payload.httpsCertPath = certPath.value;
-        if (password && password.value) payload.httpsPassword = password.value;
         try {
             const resp = await fetch('/api/sys/setting', {
                 method: 'POST',
@@ -638,7 +620,6 @@
         const validity = parseInt(byId('httpsCertGenValidity')?.value) || 3650;
         const password = (byId('httpsCertGenPassword')?.value || '').trim();
         const keysize = parseInt(byId('httpsCertGenKeysize')?.value) || 2048;
-        const outputDir = (byId('httpsCertGenOutput')?.value || '').trim() || 'ssl';
 
         if (ips.length === 0 && hostnames.length === 0) {
             if (errorEl) {
@@ -661,8 +642,7 @@
                     cn: cn || undefined,
                     validity,
                     password: password || undefined,
-                    keysize,
-                    outputDir
+                    keysize
                 })
             });
             const json = await resp.json();
@@ -677,11 +657,6 @@
             }
 
             lastHttpsCertResult = json.data;
-            const certPathInput = byId('httpsCertPathInput');
-            const passwordInput = byId('httpsPasswordInput');
-            if (certPathInput && json.data.path) certPathInput.value = json.data.path;
-            if (passwordInput && json.data.password) passwordInput.value = json.data.password;
-            updateHttpsInputState();
 
             if (resultContent) {
                 const cmdEscaped = (json.data.command || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -693,7 +668,18 @@
                     '<div style="padding:0.35rem 0;"><span style="color:var(--text-secondary);display:block;margin-bottom:0.25rem;">' + t('page.settings.https.cert_gen_result_command', '执行命令') + '</span><code style="display:block;word-break:break-all;font-size:0.65rem;padding:0.4rem;background:var(--sidebar-bg);border-radius:0.3rem;">' + cmdEscaped + '</code></div>';
             }
             if (fillHint) {
-                fillHint.innerHTML = '<i class="fas fa-info-circle"></i> ' + t('page.settings.https.cert_gen_fill_hint', '证书路径和密码已自动填入上方配置，点击「保存」并重启服务后生效。');
+                fillHint.innerHTML = '<i class="fas fa-info-circle"></i> ' + t('page.settings.https.cert_gen_fill_hint', '证书已保存至配置，点击「启用」并保存后重启服务即可生效。');
+            }
+            var warnEl = byId('httpsCertGenWarn');
+            if (warnEl) {
+                warnEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> ' + t('page.settings.https.cert_gen_download_warn', '证书已开始下载。请在安装证书并重启浏览器后，再启用 HTTPS 并重启服务，否则浏览器会拦截访问。');
+                warnEl.style.display = 'flex';
+            }
+            var downloadBtn = byId('httpsCertDownloadBtn');
+            if (downloadBtn) {
+                var certFileName = (json.data.path || '').replace(/\\/g, '/').split('/').pop() || 'keystore.p12';
+                downloadBtn.setAttribute('download', certFileName);
+                downloadBtn.click();
             }
             if (resultEl) resultEl.style.display = 'block';
             if (status) status.innerHTML = '<i class="fas fa-check-circle" style="color:#10b981;"></i> ' + t('page.settings.https.cert_gen_success', '生成成功');
@@ -1983,9 +1969,6 @@
         // HTTPS tab
         const saveHttpsBtn = byId('saveHttpsBtn');
         if (saveHttpsBtn) saveHttpsBtn.addEventListener('click', saveHttps);
-
-        const httpsToggle = byId('toggleHttpsEnabled');
-        if (httpsToggle) httpsToggle.addEventListener('change', updateHttpsInputState);
 
         const httpsCertGenBtn = byId('httpsCertGenBtn');
         if (httpsCertGenBtn) httpsCertGenBtn.addEventListener('click', generateHttpsCert);

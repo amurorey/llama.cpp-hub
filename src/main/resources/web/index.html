@@ -2856,7 +2856,8 @@
                                                     data-i18n="page.settings.https.cert_gen_hostnames">page.settings.https.cert_gen_hostnames</label>
                                                 <small class="form-text"
                                                     data-i18n="page.settings.https.cert_gen_hostnames_desc">page.settings.https.cert_gen_hostnames_desc</small>
-                                                <textarea class="form-control" id="httpsCertGenHostnames" rows="2">localhost</textarea>
+                                                  <textarea class="form-control" id="httpsCertGenHostnames" rows="2">localhost
+llama.cpp-hub</textarea>
                                             </div>
                                         </div>
 
@@ -2868,8 +2869,8 @@
                                                     <div class="settings-field">
                                                         <label class="form-label"
                                                             data-i18n="page.settings.https.cert_gen_cn">page.settings.https.cert_gen_cn</label>
-                                                        <input class="form-control" id="httpsCertGenCn" type="text"
-                                                            placeholder="localhost">
+                                                   <input class="form-control" id="httpsCertGenCn" type="text"
+                                                             placeholder="localhost" value="llama.cpp-hub">
                                                     </div>
                                                     <div class="settings-field">
                                                         <label class="form-label"
@@ -2882,8 +2883,8 @@
                                                     <div class="settings-field">
                                                         <label class="form-label"
                                                             data-i18n="page.settings.https.cert_gen_password">page.settings.https.cert_gen_password</label>
-                                                        <input class="form-control" id="httpsCertGenPassword" type="text"
-                                                            placeholder="page.settings.https.cert_gen_password_placeholder"
+                                                    <input class="form-control" id="httpsCertGenPassword" type="text" minlength="6"
+                                                             placeholder="page.settings.https.cert_gen_password_placeholder"
                                                             data-i18n="page.settings.https.cert_gen_password_placeholder"
                                                             data-i18n-attr="placeholder">
                                                     </div>
@@ -2894,14 +2895,6 @@
                                                             <option value="2048">2048</option>
                                                             <option value="4096">4096</option>
                                                         </select>
-                                                    </div>
-                                                </div>
-                                                <div class="settings-field-row" style="margin-top:0.75rem;">
-                                                    <div class="settings-field">
-                                                        <label class="form-label"
-                                                            data-i18n="page.settings.https.cert_gen_output">page.settings.https.cert_gen_output</label>
-                                                        <input class="form-control" id="httpsCertGenOutput" type="text"
-                                                            value="ssl">
                                                     </div>
                                                 </div>
                                             </div>
@@ -2925,6 +2918,9 @@
                                                     type="button" data-i18n="common.copy_command">common.copy_command</button>
                                             </div>
                                             <div id="httpsCertGenResultContent"></div>
+                                            <div id="httpsCertGenWarn"
+                                                style="display:none;margin-top:0.5rem;padding:0.5rem 0.75rem;background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.30);border-radius:0.4rem;color:#b45309;font-weight:600;font-size:0.75rem;">
+                                            </div>
                                             <div id="httpsCertGenFillHint"
                                                 style="margin-top:0.5rem;padding:0.5rem;background:rgba(16,185,129,0.08);border-radius:0.4rem;color:#10b981;">
                                             </div>
@@ -2993,30 +2989,9 @@
                                                         data-i18n="common.enable">common.enable</label>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </div>
-                                    <div class="settings-field" style="margin-top: 0.75rem;">
-                                        <label class="form-label"
-                                            data-i18n="page.settings.https.keystore_path">page.settings.https.keystore_path</label>
-                                        <small class="form-text"
-                                            data-i18n="page.settings.https.keystore_path_desc">page.settings.https.keystore_path_desc</small>
-                                        <div class="dir-browse-input-row">
-                                            <input class="form-control" id="httpsCertPathInput"
-                                                placeholder="/path/to/keystore.p12">
-                                            <button class="btn btn-secondary dir-browse-btn" type="button"
-                                                onclick="openFileBrowser('httpsCertPathInput')" title="common.browse"
-                                                data-i18n="common.browse" data-i18n-attr="title">
-                                                <i class="fas fa-folder-open"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div class="settings-field" style="margin-top: 0.75rem;">
-                                        <label class="form-label"
-                                            data-i18n="page.settings.https.password">page.settings.https.password</label>
-                                        <input class="form-control" type="password" id="httpsPasswordInput"
-                                            placeholder="page.settings.https.password">
-                                    </div>
-                                    <div class="settings-actions-row">
+                                      </div>
+                                     </div>
+                                     <div class="settings-actions-row">
                                         <button class="btn btn-primary" id="saveHttpsBtn"
                                             data-i18n="common.save">common.save</button>
                                     </div>

@@ -141,10 +141,14 @@ public class CertController implements BaseController {
             if (password.isEmpty()) {
                 password = generatePassword();
             }
+            if (password.length() < 6) {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("密码长度至少为 6 个字符"));
+                return;
+            }
             int keysize = JsonUtil.getJsonInt(body, "keysize", 2048);
             if (keysize != 2048 && keysize != 4096)
                 keysize = 2048;
-            String outputDir = JsonUtil.getJsonString(body, "outputDir", "ssl");
+            String outputDir = "ssl";
 
             String userCn = JsonUtil.getJsonString(body, "cn");
             if (userCn.isEmpty()) {
@@ -224,6 +228,10 @@ public class CertController implements BaseController {
                     return "\"" + s + "\"";
                 return s;
             }).collect(Collectors.joining(" "));
+            // PowerShell requires & for paths with spaces
+            if (isWindows && cmd.get(0).contains(" ")) {
+                cmdString = "& " + cmdString;
+            }
             // 在执行之前，应该删除旧的证书
             try {
             	Path p = outputPath.resolve("keystore.p12");
@@ -268,6 +276,7 @@ public class CertController implements BaseController {
             data.put("keysize", keysize);
             data.put("command", cmdString);
 
+            LlamaServer.updateHttpsConfig(null, keystoreFile, null, password);
             logger.info("HTTPS证书生成成功: {}", keystoreFile);
             LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
 
