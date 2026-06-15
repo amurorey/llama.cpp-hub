@@ -624,7 +624,7 @@
   "page.model.empty_remote_desc": "当前没有配置远程节点",
   "page.model.empty_local_desc": "本机没有发现模型",
   "page.model.empty_title": "没有模型",
-  "page.model.empty_desc": "请先在\u201c模型路径配置\u201d中添加模型目录",
+  "page.model.empty_desc": "请先在“模型路径配置”中添加模型目录",
   "page.model.empty_action": "去配置",
   "page.model.status.stopped": "已停止",
   "page.model.status.loading": "加载中",
@@ -651,6 +651,8 @@
   "page.model.sort.size_asc": "大小 ↑",
   "page.model.sort.size_desc": "大小 ↓",
   "page.model.sort.running_first": "运行优先",
+  "page.model.action.quick_start": "快速启动",
+  "page.model.action.quick_stop": "快速停止",
   "page.model.stats.loaded": "已加载",
   "page.model.stats.total": "总数",
   "page.model.title": "模型列表",
@@ -804,7 +806,7 @@
   "toast.model_path.update_failed": "更新失败",
   "toast.model_path.update_success": "更新成功",
   "toast.saved": "已保存",
-  "toast.success": "成功", 
+  "toast.success": "成功",
   "param.server.ctx_size.name": "上下文窗口大小",
   "param.server.ctx_size.desc": "--ctx-size：设置模型可用的上下文窗口大小（单位：token）。上下文窗口需要同时容纳提示词（prompt）和后续生成的 token；值越大，长对话/长文档能力越强，但 KV 缓存占用的内存/显存也会随之增长，预填充（prefill）和解码（decode）的计算量也可能上升。设置为 0 表示从模型文件的元数据读取默认上下文大小。",
   "param.server.flash_attn.name": "Flash Attention 加速",
@@ -929,7 +931,6 @@
   "param.server.n_cpu_moe.desc": "--n-cpu-moe N：将前 N 层的混合专家（MoE）权重保留在 CPU 内存中，其余层正常卸载到 GPU。这是 --cpu-moe 的更精细替代方案，适用于 GPU 显存不足以容纳全部 MoE 层，但也不想把所有 MoE 都放到 CPU 上的场景。",
   "param.server.spec_draft_p_min.name": "草稿最小概率",
   "param.server.spec_draft_p_min.desc": "--spec-draft-p-min / --draft-p-min P：投机解码的最小接受概率（贪婪模式）（default: 0.75）。⚠ 如果你不明白这些参数的具体含义，请不要使用。这些参数需要你有相当丰富的专业知识以及足够的耐心去测试。",
-
   "param.server.spec_draft_n_max.name": "最大草稿令牌数",
   "param.server.spec_draft_n_max.desc": "--spec-draft-n-max：每次推测解码生成的最大草稿令牌数（default: 16）。💡 对于Qwen3.5模型，将此值设为2即可获得更好效果，无需调整其它参数。⚠ 如果你不明白这些参数的具体含义，请不要使用。这些参数需要你有相当丰富的专业知识以及足够的耐心去测试。",
   "param.server.spec_draft_n_min.name": "最小草稿令牌数",
@@ -1120,9 +1121,7 @@
   "model_detail.usage.cumulative_prompt": "累计处理",
   "model_detail.usage.cumulative_predict": "累计生成",
   "model_detail.usage.no_records": "无记录",
-
   "modal.model_detail.label.usage": "用量",
-
   "page.settings.tab.nodes": "节点",
   "page.settings.nodes.hint": "管理远程 llama.cpp-hub 节点，将多台机器聚合到统一入口。",
   "page.settings.nodes.list_title": "已配置节点",
@@ -1131,18 +1130,15 @@
   "page.settings.nodes.status.online": "在线",
   "page.settings.nodes.status.offline": "离线",
   "page.settings.nodes.status.pending": "待定",
-
   "modal.node.add_title": "添加节点",
   "modal.node.edit_title": "编辑节点",
   "modal.node.id_desc": "唯一标识，添加后不可修改",
   "modal.node.url_desc": "必须以 http:// 或 https:// 开头",
   "modal.node.tags": "标签（逗号分隔）",
-
   "confirm.node.delete": "确认删除节点 \"{nodeId}\" ？",
   "report.cache_label": "缓存",
   "report.total_cache": "总缓存命中 Token",
   "report.cache_tokens": "缓存 Token",
-
   "page.settings.tab.update": "版本更新",
   "page.settings.update.current_version": "当前版本",
   "page.settings.update.check_btn": "检查更新",
@@ -1155,14 +1151,11 @@
   "page.settings.update.status.check_failed": "检查失败",
   "page.settings.update.status.checking": "检查中...",
   "page.settings.update.self_compiled": "自编译版本",
-
   "common.prev_page": "上一页",
   "common.next_page": "下一页",
   "common.confirm": "确认",
-
   "nav.benchmark_v3": "性能测试",
   "nav.usage_report": "用量报表",
-
   "page.benchmark_v3.title": "性能测试",
   "page.benchmark_v3.warn_banner": "性能测试会对计算机产生较高的负载，并且根据计算机性能的不同（如 CPU 推理 VS RTX 5090 推理）花费的时间也不同，请务必了解这一点！",
   "page.benchmark_v3.tab.llama_server": "llama-server",
@@ -1222,7 +1215,6 @@
   "page.benchmark_v3.md_header": "时间|模型|提示词长度|预填充速度|输出长度|输出速度",
   "page.benchmark_v3.model_count": "匹配 {filtered}/{total}，已加载 {loaded}",
   "page.benchmark_v3.model_count_loaded": "总计 {total}，已加载 {loaded}",
-
   "page.usage_report.title": "用量报表",
   "page.usage_report.tab.token_summary": "Token 概览",
   "page.usage_report.tab.request_logs": "请求记录",
@@ -1246,7 +1238,6 @@
   "page.usage_report.stats.total_predicted": "总输出 Token",
   "page.usage_report.page_info": "第 {current} / {total} 页",
   "page.usage_report.no_request_logs": "暂无请求记录",
-
   "modal.node.error.id_required": "节点 ID 不能为空",
   "modal.node.error.url_required": "地址不能为空",
   "modal.node.error.update_failed": "更新失败",
@@ -1255,18 +1246,14 @@
   "modal.node.added": "已添加",
   "modal.node.error.not_found": "节点不存在",
   "modal.node.error.delete_failed": "删除失败",
-
   "sidebar.quick_links_title": "模型下载",
   "sidebar.quick_links.hf_desc": "Hugging Face 官方站点",
   "sidebar.quick_links.mirror_desc": "中国大陆镜像（更快访问）",
   "sidebar.quick_links.modelscope_desc": "ModelScope 模型库",
   "sidebar.quick_links.github_desc": "GitHub 发布页",
-
   "sidebar.tools_title": "神奇妙妙工具",
   "sidebar.tools.mtp_bench_desc": "MTP 多令牌预测基准测试",
-
   "page.console.tab_local": "本地",
-
   "modal.node.form.id": "节点 ID",
   "modal.node.form.id_placeholder": "server-gpu-a",
   "modal.node.form.name": "显示名称",
@@ -1275,7 +1262,6 @@
   "modal.node.form.url_placeholder": "http://192.168.1.100:8080",
   "modal.node.form.api_key_optional": "API Key（可选）",
   "modal.node.form.tags_placeholder": "A100, production",
-
   "page.settings.update.proxy.label": "加速地址",
   "page.settings.update.proxy.off": "关闭",
   "page.settings.update.proxy.v4": "v4.gh-proxy.org — 稳定高速",
@@ -1337,7 +1323,6 @@
   "log.llamacpp.load_error": "加载 Llama.cpp 列表出错:",
   "log.llamacpp.save_error": "保存 Llama.cpp 出错:",
   "log.llamacpp.delete_error": "删除 Llama.cpp 出错:",
-
   "page.benchmark_v3.table.draft": "投机解码",
   "page.usage_report.table.draft_tokens": "投机解码",
   "page.benchmark_v2.table.draft": "投机解码",
@@ -1886,5 +1871,8 @@
   "page.tools.perplexity.devices.desc": "选择运行测试的 GPU 设备",
   "page.tools.perplexity.devices.placeholder": "请先选择 llama.cpp 目录",
   "page.tools.perplexity.devices.empty": "未发现可用 GPU 设备",
-  "page.tools.perplexity.error.split_mode_invalid": "split-mode 值无效"
+  "page.tools.perplexity.error.split_mode_invalid": "split-mode 值无效",
+  "page.model.quick_start.no_config": "未找到启动配置，请先通过加载对话框配置启动参数",
+  "page.model.quick_start.success": "模型启动成功",
+  "page.model.quick_start.failed": "启动失败"
 }

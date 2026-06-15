@@ -256,15 +256,15 @@
   "common.save_failed": "Save failed",
   "common.saving": "Saving...",
   "common.search": "Search",
-   "common.browse": "Browse",
-   "common.theme.dark": "Dark mode",
-   "common.theme.light": "Light mode",
-   "common.theme.toggle_title": "Toggle dark mode",
-   "common.theme.toggle_title_light": "Toggle light mode",
-   "common.lang.toggle_title": "Switch language",
-   "common.lang.toggle_text_cn": "中文",
-   "common.lang.toggle_text_en": "EN",
-   "common.select_llamacpp_first": "Please select a Llama.cpp version first",
+  "common.browse": "Browse",
+  "common.theme.dark": "Dark mode",
+  "common.theme.light": "Light mode",
+  "common.theme.toggle_title": "Toggle dark mode",
+  "common.theme.toggle_title_light": "Toggle light mode",
+  "common.lang.toggle_title": "Switch language",
+  "common.lang.toggle_text_cn": "中文",
+  "common.lang.toggle_text_en": "EN",
+  "common.select_llamacpp_first": "Please select a Llama.cpp version first",
   "common.unable_connect_server": "Unable to connect to server",
   "common.unknown": "Unknown",
   "common.unknown_error": "Unknown error",
@@ -651,6 +651,8 @@
   "page.model.sort.size_asc": "Size ↑",
   "page.model.sort.size_desc": "Size ↓",
   "page.model.sort.running_first": "Running First",
+  "page.model.action.quick_start": "Quick Start",
+  "page.model.action.quick_stop": "Quick Stop",
   "page.model.stats.loaded": "Loaded",
   "page.model.stats.total": "Total",
   "page.model.title": "Models",
@@ -929,7 +931,6 @@
   "param.server.n_cpu_moe.desc": "--n-cpu-moe N: Keep the Mixture of Experts (MoE) weights of the first N layers in the CPU, letting remaining layers offload to GPU normally. A finer-grained alternative to --cpu-moe when GPU VRAM is insufficient for all MoE layers but you don't want to offload all of them to CPU.",
   "param.server.spec_draft_p_min.name": "Draft min probability",
   "param.server.spec_draft_p_min.desc": "--spec-draft-p-min / --draft-p-min P: Minimum speculative decoding probability (greedy) (default: 0.75). ⚠ If you do not understand the specific meaning of these parameters, do not use them. These parameters require considerable expertise and sufficient patience to test.",
-
   "param.server.spec_draft_n_max.name": "Max draft tokens",
   "param.server.spec_draft_n_max.desc": "--spec-draft-n-max: Maximum number of tokens to draft per speculative decoding step (default: 16). 💡 For Qwen3.5 models, setting this value to 2 works better, no other parameters needed. ⚠ If you do not understand the specific meaning of these parameters, do not use them. These parameters require considerable expertise and sufficient patience to test.",
   "param.server.spec_draft_n_min.name": "Min draft tokens",
@@ -1120,9 +1121,7 @@
   "model_detail.usage.cumulative_prompt": "Cumulative prompt",
   "model_detail.usage.cumulative_predict": "Cumulative predict",
   "model_detail.usage.no_records": "No records",
-
   "modal.model_detail.label.usage": "Usage",
-
   "page.settings.tab.nodes": "Nodes",
   "page.settings.nodes.hint": "Manage remote llama.cpp-hub nodes, aggregating multiple machines into a single entry point.",
   "page.settings.nodes.list_title": "Configured Nodes",
@@ -1131,18 +1130,15 @@
   "page.settings.nodes.status.online": "Online",
   "page.settings.nodes.status.offline": "Offline",
   "page.settings.nodes.status.pending": "Pending",
-
   "modal.node.add_title": "Add Node",
   "modal.node.edit_title": "Edit Node",
   "modal.node.id_desc": "Unique identifier, cannot be changed after creation.",
   "modal.node.url_desc": "Must start with http:// or https://",
   "modal.node.tags": "Tags (comma-separated)",
-
   "confirm.node.delete": "Delete node \"{nodeId}\"?",
   "report.cache_label": "Cache",
   "report.total_cache": "Total Cache Hit Tokens",
   "report.cache_tokens": "Cache",
-
   "page.settings.tab.update": "Version Update",
   "page.settings.update.current_version": "Current Version",
   "page.settings.update.check_btn": "Check for Updates",
@@ -1155,14 +1151,11 @@
   "page.settings.update.status.check_failed": "Check failed",
   "page.settings.update.status.checking": "Checking...",
   "page.settings.update.self_compiled": "Self-compiled",
-
   "common.prev_page": "Prev",
   "common.next_page": "Next",
   "common.confirm": "Confirm",
-
   "nav.benchmark_v3": "Benchmark",
   "nav.usage_report": "Usage Report",
-
   "page.benchmark_v3.title": "Benchmark",
   "page.benchmark_v3.warn_banner": "Benchmarking places high load on your computer. The time it takes varies depending on your hardware (e.g., CPU inference vs RTX 5090 inference). Please be aware of this!",
   "page.benchmark_v3.tab.llama_server": "llama-server",
@@ -1222,7 +1215,6 @@
   "page.benchmark_v3.md_header": "Time|Model|Prompt Tokens|Prefill Speed|Output Length|Output Speed",
   "page.benchmark_v3.model_count": "Matched {filtered}/{total}, loaded {loaded}",
   "page.benchmark_v3.model_count_loaded": "Total {total}, loaded {loaded}",
-
   "page.usage_report.title": "Usage Report",
   "page.usage_report.tab.token_summary": "Token Summary",
   "page.usage_report.tab.request_logs": "Request Logs",
@@ -1246,7 +1238,6 @@
   "page.usage_report.stats.total_predicted": "Total Output Tokens",
   "page.usage_report.page_info": "Page {current} / {total}",
   "page.usage_report.no_request_logs": "No Request Logs",
-
   "modal.node.error.id_required": "Node ID is required",
   "modal.node.error.url_required": "URL is required",
   "modal.node.error.update_failed": "Update failed",
@@ -1255,18 +1246,14 @@
   "modal.node.added": "Added",
   "modal.node.error.not_found": "Node not found",
   "modal.node.error.delete_failed": "Delete failed",
-
   "sidebar.quick_links_title": "Model Downloads",
   "sidebar.quick_links.hf_desc": "Hugging Face Official Site",
   "sidebar.quick_links.mirror_desc": "China Mirror (Faster Access)",
   "sidebar.quick_links.modelscope_desc": "ModelScope Model Library",
   "sidebar.quick_links.github_desc": "GitHub Releases",
-
   "sidebar.tools_title": "Magic Tools",
   "sidebar.tools.mtp_bench_desc": "MTP Benchmark",
-
   "page.console.tab_local": "Local",
-
   "modal.node.form.id": "Node ID",
   "modal.node.form.id_placeholder": "server-gpu-a",
   "modal.node.form.name": "Display Name",
@@ -1275,7 +1262,6 @@
   "modal.node.form.url_placeholder": "http://192.168.1.100:8080",
   "modal.node.form.api_key_optional": "API Key (Optional)",
   "modal.node.form.tags_placeholder": "A100, production",
-
   "page.settings.update.proxy.label": "Proxy",
   "page.settings.update.proxy.off": "Off",
   "page.settings.update.proxy.v4": "v4.gh-proxy.org — Stable & Fast",
@@ -1337,7 +1323,6 @@
   "log.llamacpp.load_error": "Error loading Llama.cpp list:",
   "log.llamacpp.save_error": "Error saving Llama.cpp:",
   "log.llamacpp.delete_error": "Error deleting Llama.cpp:",
-
   "page.benchmark_v3.table.draft": "Speculative Decoding",
   "page.usage_report.table.draft_tokens": "Speculative Decoding",
   "page.benchmark_v2.table.draft": "Speculative Decoding",
@@ -1355,7 +1340,7 @@
   "common.clear": "Clear",
   "page.usage_report.filter.all": "All",
   "page.sysinfo.status.loading": "Loading...",
-  "page.sysinfo.status.updated": "Updated \u00b7 ",
+  "page.sysinfo.status.updated": "Updated · ",
   "page.sysinfo.status.load_failed": "Load failed",
   "page.sysinfo.status.unavailable": "Tool unavailable: ",
   "page.sysinfo.status.no_output": "(No output)",
@@ -1374,7 +1359,7 @@
   "report.delete_success": "Deleted {count} records",
   "report.delete_failed": "Failed to delete records",
   "page.console.status.loading": "Loading...",
-  "page.console.status.updated": "Updated \u00b7 ",
+  "page.console.status.updated": "Updated · ",
   "page.console.status.load_failed": "Load failed",
   "page.chat.main.sidebar.new_chat": "＋ New Chat",
   "page.chat.main.sidebar.search_placeholder": "Search conversations",
@@ -1886,5 +1871,8 @@
   "page.tools.perplexity.devices.desc": "Select GPU devices for testing",
   "page.tools.perplexity.devices.placeholder": "Please select a llama.cpp directory first",
   "page.tools.perplexity.devices.empty": "No GPU devices found",
-  "page.tools.perplexity.error.split_mode_invalid": "Invalid split-mode value"
+  "page.tools.perplexity.error.split_mode_invalid": "Invalid split-mode value",
+  "page.model.quick_start.no_config": "No launch config found, please configure via load dialog first",
+  "page.model.quick_start.success": "Model started successfully",
+  "page.model.quick_start.failed": "Start failed"
 }

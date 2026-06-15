@@ -507,10 +507,18 @@ const speedHtml = (model.averagePromptPerSecond ? `<span class="model-meta-promp
                              ${hasSpeed ? `<div class="model-speed-row">${speedHtml}</div>` : ''}
  							${slotsAndNode}
                          </div>`;
+       let quickBtnHtml = '';
+        if (isLoading) {
+            quickBtnHtml = `<button class="model-quick-btn quick-stop" onclick="quickStopModel(event, decodeURIComponent('${encodeURIComponent(model.id)}'), '${nodeId || 'local'}')" title="${t('page.model.action.quick_stop', '快速停止')}"><i class="fas fa-stop"></i></button>`;
+        } else if (model.isLoaded) {
+            quickBtnHtml = `<button class="model-quick-btn quick-stop" onclick="quickStopModel(event, decodeURIComponent('${encodeURIComponent(model.id)}'), '${nodeId || 'local'}')" title="${t('page.model.action.quick_stop', '快速停止')}"><i class="fas fa-stop"></i></button>`;
+        } else {
+            quickBtnHtml = `<button class="model-quick-btn quick-start" onclick="quickStartModel(event, decodeURIComponent('${encodeURIComponent(model.id)}'), '${nodeId || 'local'}')" title="${t('page.model.action.quick_start', '快速启动')}"><i class="fas fa-play"></i></button>`;
+        }
         const statusBadge = `<div class="model-status-badge ${statusClass}">
-                            <i class="fas ${statusIcon}"></i> <span>${statusText}</span>
-                            ${model.busy && model.isLoaded ? '<span class="model-busy-indicator"><i class="fas fa-sync-alt fa-spin"></i> ' + t('page.model.status.busy', '工作中') + '</span>' : ''}
-                        </div>`;
+                             <i class="fas ${statusIcon}"></i> <span>${statusText}</span>${quickBtnHtml}
+                             ${model.busy && model.isLoaded ? '<span class="model-busy-indicator"><i class="fas fa-sync-alt fa-spin"></i> ' + t('page.model.status.busy', '工作中') + '</span>' : ''}
+                         </div>`;
         const actionsBlock = `<div class="model-actions">${actionButtons}</div>`;
         const bottomContent = isGridView
             ? `<div class="model-card-bottom">${statusBadge}${actionsBlock}</div>`
@@ -689,3 +697,63 @@ function refreshModels() {
         });
 }
 
+
+function quickStopModel(event, modelId, nodeId) {
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    stopModel(modelId, nodeId);
+}
+
+function quickStartModel(event, modelId, nodeId) {
+    if (event) { event.preventDefault(); event.stopPropagation(); }
+    var configNodeId = nodeId && nodeId !== 'local' ? nodeId : '';
+    var configUrl = configNodeId
+        ? '/api/models/config/get?modelId=' + encodeURIComponent(modelId) + '&nodeId=' + encodeURIComponent(configNodeId)
+        : '/api/models/config/get?modelId=' + encodeURIComponent(modelId);
+    fetch(configUrl)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data || !data.success) {
+                throw new Error(data && data.error ? data.error : 'load config failed');
+            }
+            var configs = data.data && data.data.configs ? data.data.configs : {};
+            var selected = data.data && data.data.selectedConfig ? data.data.selectedConfig : 'default';
+            var config = configs[selected] || {};
+            var llamaBinPath = config.llamaBinPath || '';
+            var cmd = config.cmd || '';
+            var extraParams = config.extraParams || '';
+            if (!llamaBinPath && !cmd) {
+                showToast(t('toast.warning', '提示'), t('page.model.quick_start.no_config', '未找到启动配置，请先通过加载对话框配置启动参数'), 'warning');
+                return;
+            }
+            var payload = {
+                modelId: modelId,
+                llamaBinPathSelect: llamaBinPath,
+                cmd: cmd,
+                extraParams: extraParams
+            };
+            if (nodeId && nodeId !== 'local') payload.nodeId = nodeId;
+            fetch('/api/models/load', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(res) {
+                if (res.success) {
+                    if (res.data && res.data.async) {
+                        window.pendingModelLoad = { modelId: modelId };
+                    } else {
+                        showToast(t('toast.success', '成功'), t('page.model.quick_start.success', '模型启动成功'), 'success');
+                    }
+                } else {
+                    showToast(t('toast.error', '错误'), res.error || t('page.model.quick_start.failed', '启动失败'), 'error');
+                }
+            })
+            .catch(function(err) {
+                showToast(t('toast.error', '错误'), err.message || t('page.model.quick_start.failed', '启动失败'), 'error');
+            });
+        })
+        .catch(function(err) {
+            showToast(t('toast.error', '错误'), err.message || t('page.model.quick_start.failed', '启动失败'), 'error');
+        });
+}
