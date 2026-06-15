@@ -104,8 +104,8 @@ function loadModels() {
                                     speedData.data.forEach(s => { speedMap[s.modelId] = s; });
                                 }
                                 currentModelsData = modelsWithStatus.map(m => {
-                                    var speedKey = m.alias && m.alias.trim() ? m.alias : m.id;
-                                    var speedEntry = speedMap[speedKey];
+                                    var speedEntry = speedMap[m.id];
+                                    if (!speedEntry && m.alias) speedEntry = speedMap[m.alias];
                                     return {
                                         ...m,
                                         averagePredictedPerSecond: speedEntry ? speedEntry.averagePredictedPerSecond : 0,
