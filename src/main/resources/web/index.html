@@ -2153,6 +2153,85 @@
             color: #fbbf24 !important;
         }
 
+        .ctx-cb {
+            position: relative;
+        }
+        .ctx-cb-input-row {
+            display: flex;
+            align-items: stretch;
+            position: relative;
+        }
+        .ctx-cb-input {
+            flex: 1;
+            padding-right: 2.5rem !important;
+        }
+        .ctx-cb-btn {
+            position: absolute;
+            right: 1px;
+            top: 1px;
+            bottom: 1px;
+            width: 2.2rem;
+            border: none;
+            border-left: 1px solid var(--border-color);
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 14px;
+            border-radius: 0 6px 6px 0;
+            transition: background 0.15s;
+            padding: 0;
+            font-family: inherit;
+        }
+        .ctx-cb-btn:hover {
+            background: rgba(128,128,128,0.08);
+        }
+        .ctx-cb-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-top: 3px;
+            max-height: 220px;
+            overflow-y: auto;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.14);
+        }
+        .ctx-cb-menu.open {
+            display: block;
+        }
+        .ctx-cb-opt {
+            padding: 9px 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.1s;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .ctx-cb-opt:last-child {
+            border-bottom: none;
+        }
+        .ctx-cb-opt:hover {
+            background: rgba(99,102,241,0.08);
+        }
+        .ctx-cb-opt-label {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .ctx-cb-opt-val {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-family: Consolas, monospace;
+        }
+
         [data-theme="dark"] .param-desc-trigger {
             color: var(--text-secondary) !important;
         }
@@ -5374,10 +5453,33 @@ llama.cpp-hub</textarea>
                 // 根据 type 渲染不同的输入控件
                 switch (type) {
                     case 'INTEGER':
-                        html += '<div class="form-group param-field">';
-                        html += labelHtml;
-                        html += `<input type="number" class="form-control" id="${fieldId}" name="${fieldName}" value="${defaultValue}">`;
-                        html += '</div>';
+                        if (fieldName === 'ctx-size') {
+                            const ctxPresets = [
+                                { value: '8192',   label: '8K' },
+                                { value: '16384',  label: '16K' },
+                                { value: '32768',  label: '32K' },
+                                { value: '65536',  label: '64K' },
+                                { value: '131072', label: '128K' },
+                                { value: '262144', label: '256K' }
+                            ];
+                            html += '<div class="form-group param-field">';
+                            html += labelHtml;
+                            html += `<div class="ctx-cb" data-field-id="${fieldId}">`;
+                            html += `<div class="ctx-cb-input-row">`;
+                            html += `<input type="text" inputmode="numeric" class="form-control ctx-cb-input" id="${fieldId}" name="${fieldName}" value="${defaultValue}" autocomplete="off">`;
+                            html += `<button type="button" class="ctx-cb-btn" tabindex="-1" title="选择预设">▾</button>`;
+                            html += `</div>`;
+                            html += `<div class="ctx-cb-menu">`;
+                            ctxPresets.forEach(opt => {
+                                html += `<div class="ctx-cb-opt" data-value="${opt.value}"><span class="ctx-cb-opt-label">${escapeHtml(opt.label)}</span><span class="ctx-cb-opt-val">${escapeHtml(opt.value)}</span></div>`;
+                            });
+                            html += `</div></div></div>`;
+                        } else {
+                            html += '<div class="form-group param-field">';
+                            html += labelHtml;
+                            html += `<input type="number" class="form-control" id="${fieldId}" name="${fieldName}" value="${defaultValue}">`;
+                            html += '</div>';
+                        }
                         break;
 
                     case 'FLOAT':
@@ -5522,6 +5624,42 @@ llama.cpp-hub</textarea>
                 openParamDescModal(_i18nT(_pn, _pn), _i18nT(_pf, _pf), _i18nT(_pd, _pd));
                 e.preventDefault();
                 e.stopPropagation();
+            }
+        });
+
+        // ctx-size combobox handlers
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('.ctx-cb-btn');
+            if (btn) {
+                var wrapper = btn.closest('.ctx-cb');
+                if (wrapper) {
+                    var menu = wrapper.querySelector('.ctx-cb-menu');
+                    if (menu) {
+                        menu.classList.toggle('open');
+                    }
+                    wrapper.querySelector('.ctx-cb-input').focus();
+                }
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            var opt = e.target.closest('.ctx-cb-opt');
+            if (opt) {
+                var wrapper = opt.closest('.ctx-cb');
+                if (wrapper) {
+                    var input = wrapper.querySelector('.ctx-cb-input');
+                    if (input) {
+                        input.value = opt.getAttribute('data-value');
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                    var menu = wrapper.querySelector('.ctx-cb-menu');
+                    if (menu) menu.classList.remove('open');
+                }
+                e.preventDefault();
+                return;
+            }
+            if (!e.target.closest('.ctx-cb')) {
+                document.querySelectorAll('.ctx-cb-menu.open').forEach(function (m) { m.classList.remove('open'); });
             }
         });
 
