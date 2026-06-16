@@ -3,6 +3,7 @@
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
@@ -16,8 +17,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import org.mark.llamacpp.server.BuildInfo;
+import org.mark.llamacpp.server.LlamaHubNode;
 import org.mark.llamacpp.server.LlamaServer;
 import org.mark.llamacpp.server.LlamaServerManager;
+import org.mark.llamacpp.server.NodeManager;
 import org.mark.llamacpp.server.controller.BaseController;
 import org.mark.llamacpp.server.controller.AutoLoadPolicyController;
 import org.mark.llamacpp.server.controller.ChatStateController;
@@ -363,31 +366,117 @@ public class BasicRouterHandler extends SimpleChannelInboundHandler<FullHttpRequ
 		LlamaServerManager manager = LlamaServerManager.getInstance();
 		String modelId = manager.resolveModelId(modelName);
 
-		if (modelId == null) {
-			LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.NOT_FOUND, "Model not found: " + modelName);
-			return;
-		}
-
-		if (!manager.getLoadedProcesses().containsKey(modelId)) {
-			if (autoload) {
-				String err = manager.autoLoadModelFromConfig(modelId, 600000);
-				if (err != null) {
-					LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "Auto-load failed: " + err);
-					return;
+		if (modelId != null) {
+			if (!manager.getLoadedProcesses().containsKey(modelId)) {
+				if (autoload) {
+					String err = manager.autoLoadModelFromConfig(modelId, 600000);
+					if (err == null) {
+						Integer port = manager.getModelPort(modelId);
+						if (port != null) {
+							this.forwardProps(ctx, modelId, port);
+							return;
+						}
+					}
 				}
 			} else {
-				LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.NOT_FOUND, "模型未加载: " + modelId);
-				return;
+				Integer port = manager.getModelPort(modelId);
+				if (port != null) {
+					this.forwardProps(ctx, modelId, port);
+					return;
+				}
 			}
 		}
 
-		Integer port = manager.getModelPort(modelId);
-		if (port == null) {
-			LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "未找到模型端口: " + modelId);
+		// 本地未加载或未找到，搜索远程节点
+		logger.info("[Props路由] 本地模型未加载，开始搜索远程节点: model={}", modelName);
+		String remoteUrl = this.resolvePropsRemoteUrl(modelName);
+		if (remoteUrl != null) {
+			this.forwardPropsToRemote(ctx, remoteUrl);
 			return;
 		}
 
-		this.forwardProps(ctx, modelId, port);
+		LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.NOT_FOUND, "Model not found: " + modelName);
+	}
+
+	private String resolvePropsRemoteUrl(String modelName) {
+		for (LlamaHubNode node : NodeManager.getInstance().listEnabledNodes()) {
+			NodeManager.HttpResult result = NodeManager.getInstance().callRemoteApi(node.getNodeId(), "GET", "v1/models", null);
+			if (!result.isSuccess()) continue;
+			try {
+				com.google.gson.JsonObject root = JsonUtil.fromJson(result.getBody(), com.google.gson.JsonObject.class);
+				if (root == null) continue;
+				boolean found = false;
+				if (root.has("models") && root.get("models").isJsonArray()) {
+					for (com.google.gson.JsonElement el : root.getAsJsonArray("models")) {
+						if (!el.isJsonObject()) continue;
+						String key = JsonUtil.getJsonString(el.getAsJsonObject(), "model");
+						if (key.isEmpty()) key = JsonUtil.getJsonString(el.getAsJsonObject(), "name");
+						if (modelName.equals(key)) { found = true; break; }
+					}
+				}
+				if (!found && root.has("data") && root.get("data").isJsonArray()) {
+					for (com.google.gson.JsonElement el : root.getAsJsonArray("data")) {
+						if (!el.isJsonObject()) continue;
+						String id = JsonUtil.getJsonString(el.getAsJsonObject(), "id", "");
+						if (modelName.equals(id)) { found = true; break; }
+					}
+				}
+				if (found) {
+					logger.info("[Props路由] 远程节点匹配成功: model={}, nodeId={}", modelName, node.getNodeId());
+					return node.getBaseUrl() + "/llama.cpp/props?model=" + modelName;
+				}
+			} catch (Exception ignore) {
+			}
+		}
+		return null;
+	}
+
+	private void forwardPropsToRemote(ChannelHandlerContext ctx, String targetUrl) {
+		try {
+			URL url = URI.create(targetUrl).toURL();
+			HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+			if (connection instanceof javax.net.ssl.HttpsURLConnection) {
+				try {
+					NodeManager.trustAllCerts((javax.net.ssl.HttpsURLConnection) connection);
+				} catch (Exception e) {
+					logger.warn("配置HTTPS证书信任失败: {}", e.getMessage());
+				}
+			}
+			connection.setRequestMethod("GET");
+			connection.setConnectTimeout(30000);
+			connection.setReadTimeout(30000);
+			int responseCode = connection.getResponseCode();
+			String responseBody;
+
+			if (responseCode >= 200 && responseCode < 300) {
+				try (BufferedReader br = new BufferedReader(
+						new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+					StringBuilder sb = new StringBuilder();
+					String line;
+					while ((line = br.readLine()) != null) {
+						sb.append(line);
+					}
+					responseBody = sb.toString();
+				}
+				com.google.gson.JsonObject json = JsonUtil.fromJson(responseBody, com.google.gson.JsonObject.class);
+				json.addProperty("ui", true);
+				LlamaServer.sendExpressRawJsonResponse(ctx, HttpResponseStatus.OK, json.toString().getBytes(CharsetUtil.UTF_8), true);
+			} else {
+				try (BufferedReader br = new BufferedReader(
+						new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
+					StringBuilder sb = new StringBuilder();
+					String line;
+					while ((line = br.readLine()) != null) {
+						sb.append(line);
+					}
+					responseBody = sb.toString();
+				}
+				LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.BAD_GATEWAY, "获取远程props失败: " + responseBody);
+			}
+			connection.disconnect();
+		} catch (Exception e) {
+			LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "获取远程props失败: " + e.getMessage());
+		}
 	}
 
 	private void forwardProps(ChannelHandlerContext ctx, String modelId, int port) {
@@ -469,19 +558,129 @@ public class BasicRouterHandler extends SimpleChannelInboundHandler<FullHttpRequ
 				return;
 			}
 
-			logger.info("[llama.cpp API] 加载模型: modelId={}", modelId);
-			String err = manager.autoLoadModelFromConfig(modelId, 600000);
-			if (err != null) {
-				LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, err);
+			// 尝试本地加载
+			if (manager.resolveModelId(modelId) != null) {
+				logger.info("[llama.cpp API] 加载模型: modelId={}", modelId);
+				String err = manager.autoLoadModelFromConfig(modelId, 600000);
+				if (err == null) {
+					JsonObject resp = new JsonObject();
+					resp.addProperty("success", true);
+					LlamaServer.sendJsonResponse(ctx, resp);
+					return;
+				}
+				logger.warn("[llama.cpp API] 本地加载失败: modelId={}, error={}", modelId, err);
+			}
+
+			// 本地不可加载，搜索远程节点
+			logger.info("[llama.cpp API] 本地无法加载，开始搜索远程节点: modelId={}", modelId);
+			String remoteUrl = this.resolveLoadModelRemoteUrl(modelId);
+			if (remoteUrl != null) {
+				this.forwardLoadModelToRemote(ctx, content, remoteUrl);
 				return;
 			}
 
-			JsonObject resp = new JsonObject();
-			resp.addProperty("success", true);
-			LlamaServer.sendJsonResponse(ctx, resp);
+			LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.NOT_FOUND, "Model not found: " + modelId);
 		} catch (Exception e) {
 			logger.info("加载模型时发生错误", e);
 			LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, "加载模型失败: " + e.getMessage());
+		}
+	}
+
+	private String resolveLoadModelRemoteUrl(String modelName) {
+		for (LlamaHubNode node : NodeManager.getInstance().listEnabledNodes()) {
+			NodeManager.HttpResult result = NodeManager.getInstance().callRemoteApi(node.getNodeId(), "GET", "v1/models", null);
+			if (!result.isSuccess()) continue;
+			try {
+				com.google.gson.JsonObject root = JsonUtil.fromJson(result.getBody(), com.google.gson.JsonObject.class);
+				if (root == null) continue;
+				boolean found = false;
+				if (root.has("models") && root.get("models").isJsonArray()) {
+					for (com.google.gson.JsonElement el : root.getAsJsonArray("models")) {
+						if (!el.isJsonObject()) continue;
+						String key = JsonUtil.getJsonString(el.getAsJsonObject(), "model");
+						if (key.isEmpty()) key = JsonUtil.getJsonString(el.getAsJsonObject(), "name");
+						if (modelName.equals(key)) { found = true; break; }
+					}
+				}
+				if (!found && root.has("data") && root.get("data").isJsonArray()) {
+					for (com.google.gson.JsonElement el : root.getAsJsonArray("data")) {
+						if (!el.isJsonObject()) continue;
+						String id = JsonUtil.getJsonString(el.getAsJsonObject(), "id", "");
+						if (modelName.equals(id)) { found = true; break; }
+					}
+				}
+				if (found) {
+					logger.info("[llama.cpp API] 远程节点匹配成功: model={}, nodeId={}", modelName, node.getNodeId());
+					return node.getBaseUrl() + "/llama.cpp/models/load";
+				}
+			} catch (Exception ignore) {
+			}
+		}
+		return null;
+	}
+
+	private void forwardLoadModelToRemote(ChannelHandlerContext ctx, String content, String targetUrl) {
+		HttpURLConnection connection = null;
+		try {
+			URL url = URI.create(targetUrl).toURL();
+			connection = (HttpURLConnection) url.openConnection();
+			if (connection instanceof javax.net.ssl.HttpsURLConnection) {
+				try {
+					NodeManager.trustAllCerts((javax.net.ssl.HttpsURLConnection) connection);
+				} catch (Exception e) {
+					logger.warn("配置HTTPS证书信任失败: {}", e.getMessage());
+				}
+			}
+			connection.setRequestMethod("POST");
+			connection.setDoOutput(true);
+			connection.setConnectTimeout(60000);
+			connection.setReadTimeout(600000);
+
+			byte[] outBytes = content.getBytes(StandardCharsets.UTF_8);
+			connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+			connection.setRequestProperty("Content-Length", String.valueOf(outBytes.length));
+			try (OutputStream os = connection.getOutputStream()) {
+				os.write(outBytes);
+			}
+
+			int responseCode = connection.getResponseCode();
+			String responseBody;
+			if (responseCode >= 200 && responseCode < 300) {
+				try (BufferedReader br = new BufferedReader(
+						new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+					StringBuilder sb = new StringBuilder();
+					String line;
+					while ((line = br.readLine()) != null) {
+						sb.append(line);
+					}
+					responseBody = sb.toString();
+				}
+				byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
+				LlamaServer.sendExpressRawJsonResponse(ctx, HttpResponseStatus.OK, bytes, true);
+			} else {
+				try (BufferedReader br = new BufferedReader(
+						new InputStreamReader(connection.getErrorStream(), StandardCharsets.UTF_8))) {
+					StringBuilder sb = new StringBuilder();
+					String line;
+					while ((line = br.readLine()) != null) {
+						sb.append(line);
+					}
+					responseBody = sb.toString();
+				}
+				LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.BAD_GATEWAY,
+					"远程加载失败: " + (responseBody != null ? responseBody : "HTTP " + responseCode));
+			}
+			connection.disconnect();
+		} catch (Exception e) {
+			LlamaServer.sendJsonErrorResponse(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR,
+				"远程加载失败: " + e.getMessage());
+		} finally {
+			if (connection != null) {
+				try {
+					connection.disconnect();
+				} catch (Exception ignore) {
+				}
+			}
 		}
 	}
 

@@ -347,44 +347,62 @@ public class OpenAIService {
 				isStream = requestJson.get("stream").getAsBoolean();
 			}
 
-			// 检查模型是否已加载
-			if (!manager.getLoadedProcesses().containsKey(modelName)) {
-				String resolved = manager.findModelIdByAlias(modelName);
-				if (resolved != null) {
-					modelName = resolved;
-				}
-			}
-			if (!manager.getLoadedProcesses().containsKey(modelName)) {
-				String loadError = this.tryAutoLoadModel(manager, modelName);
-				if (loadError == null) {
-					Integer modelPort = manager.getModelPort(modelName);
-					if (modelPort != null) {
-						ModelSamplingService service = ModelSamplingService.getInstance();
-						service.handleOpenAI(requestJson);
-						this.forwardRequestToLlamaCpp(ctx, request, modelName, modelPort, "/v1/completions", isStream, JsonUtil.toJson(requestJson));
-						return;
+			String targetUrl = null;
+			String remoteApiKey = null;
+			Integer localPort = null;
+			String loadError = null;
+
+			if (modelName != null && !modelName.isBlank()) {
+				if (!manager.getLoadedProcesses().containsKey(modelName)) {
+					String resolved = manager.findModelIdByAlias(modelName);
+					if (resolved != null) {
+						modelName = resolved;
 					}
 				}
-				int statusCode = loadError != null ? 500 : 404;
-				this.sendOpenAIErrorResponseWithCleanup(ctx, statusCode, null,
-					loadError != null ? loadError : "Model not found: " + modelName, "model");
-				return;
+				if (!manager.getLoadedProcesses().containsKey(modelName)) {
+					loadError = this.tryAutoLoadModel(manager, modelName);
+					if (loadError == null) {
+						Integer port = manager.getModelPort(modelName);
+						if (port != null) {
+							localPort = port;
+							targetUrl = String.format("http://localhost:%d/v1/completions", port.intValue());
+						}
+					}
+				}
+				if (manager.getLoadedProcesses().containsKey(modelName)) {
+					localPort = manager.getModelPort(modelName);
+					if (localPort != null) {
+						targetUrl = String.format("http://localhost:%d/v1/completions", localPort.intValue());
+					}
+				}
 			}
+
+			if (targetUrl == null && modelName != null && !modelName.isBlank()) {
+				logger.info("[OpenAICompletions路由] 本地未找到模型，开始搜索远程节点: model={}", modelName);
+				String[] remote = this.resolveFromRemoteNodes(modelName, "[OpenAICompletions路由]");
+				if (remote != null) {
+					targetUrl = remote[0] + "/v1/completions";
+					remoteApiKey = remote[1];
+				}
+			}
+
 			ModelSamplingService service = ModelSamplingService.getInstance();
 			service.handleOpenAI(requestJson);
-			
-			// 在这加入特殊处理，判断是否存在特殊字符。
-			//String body = LlamaCommandParser.filterCompletion(ctx, modelName, requestJson);
-			//if(body == null)
-				//return;
-			// 获取模型端口
-			Integer modelPort = manager.getModelPort(modelName);
-			if (modelPort == null) {
-				this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, "Model port not found: " + modelName, null);
+
+			if (targetUrl == null) {
+				int statusCode = loadError != null ? 500 : 404;
+				this.sendOpenAIErrorResponseWithCleanup(ctx, statusCode, null,
+					loadError != null ? loadError : "Model not found: " + (modelName != null ? modelName : "unknown"), "model");
 				return;
 			}
-			// 转发请求到对应的llama.cpp进程
-			this.forwardRequestToLlamaCpp(ctx, request, modelName, modelPort, "/v1/completions", isStream, JsonUtil.toJson(requestJson));
+
+			if (localPort != null) {
+				this.forwardRequestToLlamaCpp(ctx, request, modelName, localPort, "/v1/completions", isStream, JsonUtil.toJson(requestJson));
+			} else if (isStream) {
+				this.forwardStreamToRemote(ctx, request, modelName, targetUrl, remoteApiKey, "/v1/completions", requestJson);
+			} else {
+				this.forwardNonStreamToRemote(ctx, request, modelName, targetUrl, remoteApiKey, "/v1/completions", requestJson);
+			}
 		} catch (Exception e) {
 			logger.info("处理OpenAI文本补全请求时发生错误", e);
 			this.sendOpenAIErrorResponseWithCleanup(ctx, 500, null, e.getMessage(), null);
