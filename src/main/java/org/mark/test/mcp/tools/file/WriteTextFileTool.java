@@ -49,6 +49,11 @@ public class WriteTextFileTool implements IMCPTool {
 	}
 
 	@Override
+	public boolean isWritePermission() {
+		return true;
+	}
+
+	@Override
 	public McpToolInputSchema getInputSchema() {
 		return new McpToolInputSchema()
 				.addProperty("absolutePath", "string",

@@ -18,4 +18,8 @@ public interface IMCPTool {
 	McpToolInputSchema getInputSchema();
 
 	McpMessage execute(String serviceKey, JsonObject arguments, Map<String, String> headers);
+
+	default boolean isWritePermission() {
+		return false;
+	}
 }

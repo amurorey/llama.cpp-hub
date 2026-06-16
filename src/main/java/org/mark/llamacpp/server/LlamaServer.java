@@ -859,6 +859,10 @@ public class LlamaServer {
 		return service != null && service.isRunning();
 	}
 
+	public static DefaultMcpServiceImpl getMcpServerService() {
+		return mcpServerService;
+	}
+
 	public static SslContext getHttpsSslContext() {
 		return httpsSslContext;
 	}

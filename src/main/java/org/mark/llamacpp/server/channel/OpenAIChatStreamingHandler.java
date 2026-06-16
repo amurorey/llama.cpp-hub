@@ -81,8 +81,13 @@ public class OpenAIChatStreamingHandler extends ChannelInboundHandlerAdapter {
 				this.resetSession();
 				return;
 			}
+			// 归一化 /llama.cpp/v1/... -> /v1/...
+			String normUri = request.uri();
+			if (normUri.startsWith("/llama.cpp/v1/")) {
+				normUri = "/v1" + normUri.substring("/llama.cpp/v1/".length());
+			}
 			// 判断是不是v1的API，再判断有无密钥，实际上密钥压根没用过。
-			if (request.uri().startsWith("/v1") && !this.validateApiKey(request)) {
+			if (normUri.startsWith("/v1") && !this.validateApiKey(request)) {
 				// OpenAI 兼容前缀下先做鉴权，失败时立即终止当前会话。
 				LlamaServer.sendErrorResponse(ctx, HttpResponseStatus.UNAUTHORIZED, "invalid api key");
 				ReferenceCountUtil.release(msg);
@@ -91,7 +96,7 @@ public class OpenAIChatStreamingHandler extends ChannelInboundHandlerAdapter {
 			}
 
 			// 会话启动后会在独立线程中读取 requestBodyStream，并在识别出 model 后连接目标 llama.cpp 进程。
-			String path = request.uri();
+			String path = normUri;
 			if (path.startsWith("/v1/messages")) {
 				this.currentSession = new ChatStreamSession(ctx, this.openAIService, this.anthropicService,
 						"/v1/messages", request.method(), this.copyHeaders(request));
@@ -172,7 +177,9 @@ public class OpenAIChatStreamingHandler extends ChannelInboundHandlerAdapter {
 				|| uri.startsWith("/v1/chat/completion")
 				|| uri.startsWith("/chat/completion")
 				|| uri.startsWith("/v1/messages")
-				|| uri.startsWith("/v1/complete");
+				|| uri.startsWith("/v1/complete")
+				|| uri.startsWith("/llama.cpp/v1/chat/completions")
+				|| uri.startsWith("/llama.cpp/v1/chat/completion");
 	}
 	
 	/**

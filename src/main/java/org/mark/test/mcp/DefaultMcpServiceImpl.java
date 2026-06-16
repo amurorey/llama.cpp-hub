@@ -86,6 +86,10 @@ public class DefaultMcpServiceImpl implements McpProtocolHandler {
 		return this.nettyServer.getPort();
 	}
 
+	public McpToolRegistry getToolRegistry() {
+		return this.toolRegistry;
+	}
+
 	public void registerTool(String serviceKey, IMCPTool tool) {
 		this.toolRegistry.register(serviceKey, tool);
 	}

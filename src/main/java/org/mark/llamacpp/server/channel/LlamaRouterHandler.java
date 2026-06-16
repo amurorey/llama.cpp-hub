@@ -82,6 +82,10 @@ public class LlamaRouterHandler extends SimpleChannelInboundHandler<FullHttpRequ
 			
 			// OpenAI API 端点
 			// 获取模型列表
+			if (uri.startsWith("/llama.cpp/v1/models")) {
+				this.openAIServerHandler.handleOpenAIModelsRequest(ctx, request);
+				return;
+			}
 			if (uri.startsWith("/v1/models") || uri.startsWith("/models")) {
 				if (this.isAnthropicClient(request)) {
 					this.anthropicService.handleModelsRequest(ctx, request);

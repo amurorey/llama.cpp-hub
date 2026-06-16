@@ -144,17 +144,21 @@ public class ParamTool {
 		List<String> tokens = new ArrayList<>();
 		StringBuilder buf = new StringBuilder();
 		boolean inQuotes = false;
-		boolean escape = false;
-		
+
 		for (int i = 0; i < s.length(); i++) {
 			char ch = s.charAt(i);
-			if (escape) {
+			if (ch == '\\' && i + 1 < s.length()) {
+				char next = s.charAt(i + 1);
+				if (next == '\\' || next == '"') {
+					buf.append(next);
+					i++;
+					continue;
+				}
 				buf.append(ch);
-				escape = false;
 				continue;
 			}
 			if (ch == '\\') {
-				escape = true;
+				buf.append(ch);
 				continue;
 			}
 			if (ch == '"') {

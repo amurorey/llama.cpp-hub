@@ -877,18 +877,24 @@ public class LlamaServerManager {
 				if (loadedIds.contains(modelId)) continue;
 				if (!canAutoLoad(modelId)) continue;
 
+				JsonObject caps = this.getModelCapabilities(modelId);
+
 				JsonObject entry = new JsonObject();
 				entry.addProperty("id", modelId);
+				entry.add("aliases", this.buildModelAliases(model));
+				entry.add("tags", new JsonArray());
 				entry.addProperty("object", "model");
+				entry.addProperty("owned_by", "llamacpp");
 				entry.addProperty("created", now);
-				entry.addProperty("owned_by", "llamacpp-server");
+				entry.add("status", this.buildModelStatus(modelId, false));
+				entry.add("architecture", this.buildModelArchitecture(model, caps));
+				entry.addProperty("need_download", false);
 
-				JsonObject caps = getModelCapabilities(modelId);
 				if (caps != null) {
 					entry.add("my_capabilities", caps);
 				}
 
-				int ctxSize = extractCtxSizeFromLaunchConfig(modelId);
+				int ctxSize = this.extractCtxSizeFromLaunchConfig(modelId);
 				if (ctxSize > 0) {
 					entry.addProperty("runtimeCtx", ctxSize);
 				}
@@ -1058,6 +1064,203 @@ public class LlamaServerManager {
 			logger.warn("[自动加载缓存] 提取 ctx-size 失败: modelId={}, error={}", modelId, e.getMessage());
 		}
 		return 0;
+	}
+
+	/**
+	 * 构建模型 status 对象，格式对齐 llama.cpp 新版：
+	 * { "value": "unloaded"|"loaded", "args": [...], "preset": "..." }
+	 * @param modelId 模型 ID
+	 * @param loaded 是否已加载
+	 * @return status JsonObject
+	 */
+	public JsonObject buildModelStatus(String modelId, boolean loaded) {
+		JsonObject status = new JsonObject();
+		status.addProperty("value", loaded ? "loaded" : "unloaded");
+
+		JsonArray argsArray = new JsonArray();
+		String preset = "";
+
+		try {
+			if (loaded) {
+				String cmd = this.getModelStartCmd(modelId);
+				if (cmd != null && !cmd.trim().isEmpty()) {
+					List<String> cmdArgs = ParamTool.splitCmdArgs(cmd);
+					for (String arg : cmdArgs) {
+						argsArray.add(arg);
+					}
+				}
+			} else {
+				String cmd = this.buildLaunchCommandStrFromConfig(modelId);
+				if (cmd != null && !cmd.trim().isEmpty()) {
+					List<String> cmdArgs = ParamTool.splitCmdArgs(cmd);
+					for (String arg : cmdArgs) {
+						argsArray.add(arg);
+					}
+				}
+			}
+
+			preset = this.buildPresetString(modelId);
+
+		} catch (Exception e) {
+			logger.warn("[模型状态] 构建 status 失败: modelId={}, error={}", modelId, e.getMessage());
+		}
+
+		status.add("args", argsArray);
+		status.addProperty("preset", preset);
+		return status;
+	}
+
+	/**
+	 * 从 launch config 重建模型的完整启动命令字符串
+	 * @param modelId 模型 ID
+	 * @return 命令字符串，无法构建返回空字符串
+	 */
+	@SuppressWarnings("unchecked")
+	private String buildLaunchCommandStrFromConfig(String modelId) {
+		try {
+			GGUFModel model = this.findModelById(modelId);
+			if (model == null) return "";
+
+			Map<String, Object> bundle = configManager.getModelLaunchConfigBundle(modelId);
+			if (bundle == null) return "";
+
+			String selectedConfigName = ParamTool.asString(bundle.get("selectedConfig"));
+			if (selectedConfigName.trim().isEmpty()) return "";
+
+			Map<String, Object> configs = ParamTool.asConfigMap(bundle.get("configs"));
+			if (configs == null) return "";
+
+			Map<String, Object> config = ParamTool.asConfigMap(configs.get(selectedConfigName));
+			if (config == null) return "";
+
+			String llamaBinPath = ParamTool.asString(config.get("llamaBinPath"));
+			if (llamaBinPath == null || llamaBinPath.trim().isEmpty()) return "";
+
+			String cmd = ParamTool.asString(config.getOrDefault("cmd", ""));
+			String extraParams = ParamTool.asString(config.getOrDefault("extraParams", ""));
+			Object evObj = config.get("enableVision");
+			boolean enableVision = evObj instanceof Boolean ? (Boolean) evObj : true;
+			List<String> device = (List<String>) config.get("device");
+			Object mgObj = config.get("mg");
+			Integer mg = (mgObj instanceof Number) ? ((Number) mgObj).intValue() : null;
+
+			String chatTemplateFilePath = ChatTemplateFileTool.getChatTemplateCacheFilePathIfExists(modelId);
+
+			return this.buildCommandStr(model, 0, llamaBinPath, device, mg, enableVision, cmd, extraParams, chatTemplateFilePath);
+		} catch (Exception e) {
+			logger.warn("[模型状态] 重建启动命令失败: modelId={}, error={}", modelId, e.getMessage());
+			return "";
+		}
+	}
+
+	/**
+	 * 构建模型的 preset 字符串（INI 格式配置）
+	 * @param modelId 模型 ID
+	 * @return preset 字符串
+	 */
+	@SuppressWarnings("unchecked")
+	private String buildPresetString(String modelId) {
+		try {
+			GGUFModel model = this.findModelById(modelId);
+			if (model == null) return "";
+
+			String modelFile = Paths.get(model.getPath(), model.getPrimaryModel().getFileName()).toString();
+
+			StringBuilder sb = new StringBuilder();
+			String alias = model.getAlias();
+			if (alias == null || alias.trim().isEmpty()) {
+				alias = model.getModelId();
+			}
+			sb.append("[").append(alias).append("]\n");
+			sb.append("model = ").append(modelFile).append("\n");
+
+			Map<String, Object> bundle = configManager.getModelLaunchConfigBundle(modelId);
+			if (bundle == null) return sb.toString();
+
+			String selectedConfigName = ParamTool.asString(bundle.get("selectedConfig"));
+			if (selectedConfigName.trim().isEmpty()) return sb.toString();
+
+			Map<String, Object> configs = ParamTool.asConfigMap(bundle.get("configs"));
+			if (configs == null) return sb.toString();
+
+			Map<String, Object> config = ParamTool.asConfigMap(configs.get(selectedConfigName));
+			if (config == null) return sb.toString();
+
+			Object evObj = config.get("enableVision");
+			boolean enableVision = evObj instanceof Boolean ? (Boolean) evObj : true;
+			List<String> device = (List<String>) config.get("device");
+			Object mgObj = config.get("mg");
+			Integer mg = (mgObj instanceof Number) ? ((Number) mgObj).intValue() : null;
+
+			if (enableVision && model.getMmproj() != null) {
+				String mmprojFile = Paths.get(model.getPath(), model.getMmproj().getFileName()).toString();
+				sb.append("mmproj = ").append(mmprojFile).append("\n");
+			}
+
+			if (device != null && !device.isEmpty()) {
+				sb.append("device = ").append(String.join(",", device)).append("\n");
+				if (mg != null && mg >= 0) {
+					sb.append("main_gpu = ").append(mg).append("\n");
+				}
+			}
+
+			return sb.toString();
+		} catch (Exception e) {
+			logger.warn("[模型状态] 构建 preset 失败: modelId={}, error={}", modelId, e.getMessage());
+			return "";
+		}
+	}
+
+	/**
+	 * 构建模型 architecture 对象：
+	 * { "input_modalities": ["text", ...], "output_modalities": ["text", ...] }
+	 * @param model GGUF 模型对象
+	 * @param caps 能力配置
+	 * @return architecture JsonObject
+	 */
+	private JsonObject buildModelArchitecture(GGUFModel model, JsonObject caps) {
+		JsonObject arch = new JsonObject();
+		JsonArray inputs = new JsonArray();
+		JsonArray outputs = new JsonArray();
+
+		boolean isEmbedding = caps != null && ParamTool.parseJsonBoolean(caps, "embedding", false);
+		boolean isRerank = caps != null && ParamTool.parseJsonBoolean(caps, "rerank", false);
+		boolean hasVision = caps != null && ParamTool.parseJsonBoolean(caps, "vision", false);
+		boolean hasAudio = caps != null && ParamTool.parseJsonBoolean(caps, "audio", false);
+
+		inputs.add("text");
+		if (hasVision || (model != null && model.getMmproj() != null)) {
+			inputs.add("image");
+		}
+		if (hasAudio) {
+			inputs.add("audio");
+		}
+
+		if (isEmbedding || isRerank) {
+			outputs.add("embedding");
+		} else {
+			outputs.add("text");
+		}
+
+		arch.add("input_modalities", inputs);
+		arch.add("output_modalities", outputs);
+		return arch;
+	}
+
+	/**
+	 * 构建模型 aliases 数组。
+	 * @param model GGUF 模型对象
+	 * @return aliases JsonArray
+	 */
+	private JsonArray buildModelAliases(GGUFModel model) {
+		JsonArray aliases = new JsonArray();
+		if (model != null && model.getAlias() != null && !model.getAlias().trim().isEmpty()) {
+			String alias = model.getAlias().trim();
+			if (!alias.equals(model.getModelId())) {
+				aliases.add(alias);
+			}
+		}
+		return aliases;
 	}
 
     /**

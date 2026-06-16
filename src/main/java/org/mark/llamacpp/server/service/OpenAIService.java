@@ -161,6 +161,16 @@ public class OpenAIService {
 							JsonObject dCopy = d.deepCopy();
 							dCopy.addProperty("runtimeCtx", runtimeCtx);
 							dCopy.add("my_capabilities", capabilities);
+							dCopy.add("status", manager.buildModelStatus(modelId, true));
+							if (!dCopy.has("aliases")) {
+								dCopy.add("aliases", new JsonArray());
+							}
+							if (!dCopy.has("tags")) {
+								dCopy.add("tags", new JsonArray());
+							}
+							if (!dCopy.has("need_download")) {
+								dCopy.addProperty("need_download", false);
+							}
 							dataById.put(id, dCopy);
 						}
 					}
