@@ -24,6 +24,7 @@ import org.mark.llamacpp.server.LlamaServerManager;
 import org.mark.llamacpp.server.NodeManager;
 import org.mark.llamacpp.server.exception.RequestMethodException;
 import org.mark.llamacpp.server.service.ModelSamplingService;
+import org.mark.llamacpp.server.service.ComputerService;
 import org.mark.llamacpp.server.tools.GPUInfoHelper;
 import org.mark.llamacpp.win.AutoStartManager;
 import org.mark.llamacpp.server.struct.ApiResponse;
@@ -1555,6 +1556,22 @@ public class SystemController implements BaseController {
 			} else {
 				resp.put("data", null);
 			}
+
+			// JVM 信息
+			JsonObject jvmInfo = new JsonObject();
+			jvmInfo.addProperty("name", ComputerService.getJvmName());
+			jvmInfo.addProperty("version", ComputerService.getJvmVersion());
+			jvmInfo.addProperty("vendor", ComputerService.getJvmVendor());
+			jvmInfo.addProperty("javaVersion", ComputerService.getJavaVersion());
+			jvmInfo.addProperty("javaVendor", ComputerService.getJavaVendor());
+			jvmInfo.addProperty("inputArguments", ComputerService.getJvmInputArguments());
+			jvmInfo.addProperty("startTime", ComputerService.getJvmStartTime());
+			jvmInfo.addProperty("maxMemoryMB", ComputerService.getJvmMaxMemoryMB());
+			jvmInfo.addProperty("totalMemoryMB", ComputerService.getJvmTotalMemoryMB());
+			jvmInfo.addProperty("freeMemoryMB", ComputerService.getJvmFreeMemoryMB());
+			jvmInfo.addProperty("usedMemoryMB", ComputerService.getJvmUsedMemoryMB());
+			jvmInfo.addProperty("availableProcessors", ComputerService.getJvmAvailableProcessors());
+			resp.put("jvm", jvmInfo);
 
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(resp));
 		} catch (Exception e) {

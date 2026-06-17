@@ -5,8 +5,12 @@ import java.io.InputStreamReader;
 import java.lang.management.ManagementFactory;
 import java.lang.management.RuntimeMXBean;
 
+import org.mark.llamacpp.server.tools.GPUInfoHelper;
+
+import com.google.gson.JsonObject;
+
 /**
- * 用来获取一些硬件信息，用来记录到benchmark v2的结果里。目前是一个意义不明的实现，以后可以被优化。
+ * 用来获取一些硬件信息，和GPUInfoHelper是重叠的，而且不如GPUInfoHelper。但是后者属于外部工具，如果被安全软件误杀或者用户删除，就没法用了，这里算是一个简单的兜底。
  */
 public class ComputerService {
 	
@@ -268,6 +272,56 @@ public class ComputerService {
 
 	public static int getJvmAvailableProcessors() {
 		return Runtime.getRuntime().availableProcessors();
+	}
+
+	public static JsonObject getFullInfo() {
+		JsonObject root = new JsonObject();
+
+		// CPU
+		JsonObject cpu = new JsonObject();
+		cpu.addProperty("model", getCPUModel());
+		cpu.addProperty("physicalCores", getCPUCoreCount());
+		cpu.addProperty("logicalProcessors", getJvmAvailableProcessors());
+		root.add("cpu", cpu);
+
+		// Memory
+		JsonObject memory = new JsonObject();
+		long ramKb = getPhysicalMemoryKB();
+		memory.addProperty("totalKB", ramKb);
+		memory.addProperty("totalGB", ramKb > 0 ? ramKb / 1024.0 / 1024.0 : -1);
+		root.add("memory", memory);
+
+		// Java
+		JsonObject javaInfo = new JsonObject();
+		javaInfo.addProperty("version", getJavaVersion());
+		javaInfo.addProperty("vendor", getJavaVendor());
+		root.add("java", javaInfo);
+
+		// JVM
+		JsonObject jvm = new JsonObject();
+		jvm.addProperty("name", getJvmName());
+		jvm.addProperty("version", getJvmVersion());
+		jvm.addProperty("vendor", getJvmVendor());
+		jvm.addProperty("inputArguments", getJvmInputArguments());
+		jvm.addProperty("startTime", getJvmStartTime());
+		jvm.addProperty("maxMemoryMB", getJvmMaxMemoryMB());
+		jvm.addProperty("totalMemoryMB", getJvmTotalMemoryMB());
+		jvm.addProperty("freeMemoryMB", getJvmFreeMemoryMB());
+		jvm.addProperty("usedMemoryMB", getJvmUsedMemoryMB());
+		jvm.addProperty("availableProcessors", getJvmAvailableProcessors());
+		root.add("jvm", jvm);
+
+		// GPU
+		JsonObject gpuData = GPUInfoHelper.getInstance().getInfo();
+		if (gpuData != null) {
+			root.add("gpu", gpuData);
+		} else {
+			JsonObject gpuErr = new JsonObject();
+			gpuErr.addProperty("error", "gpu-info 调用失败，无法获取信息");
+			root.add("gpu", gpuErr);
+		}
+
+		return root;
 	}
 
 	private static long toMb(long bytes) {

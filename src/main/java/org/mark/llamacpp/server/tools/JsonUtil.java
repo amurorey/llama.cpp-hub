@@ -151,6 +151,21 @@ public class JsonUtil {
 		}
 	}
 
+	public static double getJsonDouble(JsonObject o, String key, double fallback) {
+		if (o == null || key == null || !o.has(key) || o.get(key) == null || o.get(key).isJsonNull())
+			return fallback;
+		try {
+			return o.get(key).getAsDouble();
+		} catch (Exception e) {
+			try {
+				String s = o.get(key).getAsString();
+				return Double.parseDouble(s);
+			} catch (Exception e2) {
+				return fallback;
+			}
+		}
+	}
+
 	public static List<String> getJsonStringList(JsonElement el) {
 		if (el == null || el.isJsonNull())
 			return null;
