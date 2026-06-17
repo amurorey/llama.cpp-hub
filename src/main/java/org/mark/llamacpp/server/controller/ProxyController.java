@@ -9,12 +9,16 @@ import org.mark.llamacpp.crawler.NettyHttpUtils;
 import org.mark.llamacpp.crawler.ProxyConfig;
 import org.mark.llamacpp.crawler.UserAgentUtils;
 import org.mark.llamacpp.server.LlamaServer;
+import org.mark.llamacpp.server.NodeManager;
 import org.mark.llamacpp.server.exception.RequestMethodException;
 import org.mark.llamacpp.server.struct.ApiResponse;
 import org.mark.llamacpp.server.struct.ProxyConfigData;
 import org.mark.llamacpp.server.tools.JsonUtil;
+import org.mark.llamacpp.server.tools.ParamTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.google.gson.JsonObject;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.FullHttpRequest;
@@ -45,12 +49,61 @@ public class ProxyController implements BaseController {
         return false;
     }
 
+    private void proxyPostRemote(ChannelHandlerContext ctx, FullHttpRequest request, String nodeId, String path) {
+        this.proxyPostRemote(ctx, request, nodeId, path, 0, 0);
+    }
+
+    private void proxyPostRemote(ChannelHandlerContext ctx, FullHttpRequest request, String nodeId, String path, int connectTimeout, int readTimeout) {
+        try {
+            String content = request.content().toString(CharsetUtil.UTF_8);
+            JsonObject body = content != null && !content.trim().isEmpty()
+                    ? JsonUtil.fromJson(content, JsonObject.class) : null;
+            if (body != null) {
+                body.remove("nodeId");
+                if (body.size() == 0) body = null;
+            }
+            NodeManager.HttpResult result;
+            if (connectTimeout > 0 && readTimeout > 0) {
+                result = NodeManager.getInstance().callRemoteApi(nodeId, "POST", path, body, connectTimeout, readTimeout);
+            } else {
+                result = NodeManager.getInstance().callRemoteApi(nodeId, "POST", path, body);
+            }
+            if (result.isSuccess()) {
+                NodeManager.writeHttpResultToChannel(ctx, result, "[代理远程]");
+            } else {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: code=" + result.getStatusCode()));
+            }
+        } catch (Exception e) {
+            logger.warn("远程节点调用失败: nodeId={}, path={}, error={}", nodeId, path, e.getMessage());
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: " + e.getMessage()));
+        }
+    }
+
+    private void proxyGetRemote(ChannelHandlerContext ctx, String nodeId, String path) {
+        try {
+            NodeManager.HttpResult result = NodeManager.getInstance().callRemoteApi(nodeId, "GET", path, null);
+            if (result.isSuccess()) {
+                NodeManager.writeHttpResultToChannel(ctx, result, "[代理远程]");
+            } else {
+                LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: code=" + result.getStatusCode()));
+            }
+        } catch (Exception e) {
+            logger.warn("远程节点调用失败: nodeId={}, path={}, error={}", nodeId, path, e.getMessage());
+            LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: " + e.getMessage()));
+        }
+    }
+
     /**
      * GET /api/proxy/get
      */
     private void handleProxyGet(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
         this.assertRequestMethod(request.method() != HttpMethod.GET, "只支持GET请求");
         try {
+            String nodeId = ParamTool.getQueryParam(request.uri()).get("nodeId");
+            if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+                this.proxyGetRemote(ctx, nodeId, "api/proxy/get");
+                return;
+            }
             Path configFile = LlamaServer.getProxyConfigPath();
             ProxyConfigData cfg = LlamaServer.readProxyConfig(configFile);
             if (cfg == null) {
@@ -74,6 +127,11 @@ public class ProxyController implements BaseController {
     private void handleProxySave(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
         this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
         try {
+            String nodeId = ParamTool.getQueryParam(request.uri()).get("nodeId");
+            if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+                this.proxyPostRemote(ctx, request, nodeId, "api/proxy/save");
+                return;
+            }
             String content = request.content().toString(CharsetUtil.UTF_8);
             if (content == null || content.trim().isEmpty()) {
                 LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
@@ -129,6 +187,11 @@ public class ProxyController implements BaseController {
     private void handleProxyTest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
         this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
         try {
+            String nodeId = ParamTool.getQueryParam(request.uri()).get("nodeId");
+            if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+                this.proxyPostRemote(ctx, request, nodeId, "api/proxy/test", 5000, 15000);
+                return;
+            }
             String content = request.content().toString(CharsetUtil.UTF_8);
             ProxyConfigData reqData = null;
             if (content != null && !content.trim().isEmpty()) {

@@ -138,6 +138,11 @@ public class LlamacppController implements BaseController {
 		// 断言一下请求方式
 		this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
 		try {
+			String nodeId = ParamTool.getQueryParam(request.uri()).get("nodeId");
+			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+				this.proxyPostRemote(ctx, request, nodeId, "api/llamacpp/add");
+				return;
+			}
 			String content = request.content().toString(CharsetUtil.UTF_8);
 			if (content == null || content.trim().isEmpty()) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
@@ -210,6 +215,11 @@ public class LlamacppController implements BaseController {
 	private void handleLlamaCppRemove(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
 		this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
 		try {
+			String nodeId = ParamTool.getQueryParam(request.uri()).get("nodeId");
+			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+				this.proxyPostRemote(ctx, request, nodeId, "api/llamacpp/remove");
+				return;
+			}
 			String content = request.content().toString(CharsetUtil.UTF_8);
 			if (content == null || content.trim().isEmpty()) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
@@ -495,6 +505,36 @@ public class LlamacppController implements BaseController {
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("获取远程节点llama.cpp列表失败: " + e.getMessage()));
 		}
 	}
+
+	private void proxyPostRemote(ChannelHandlerContext ctx, FullHttpRequest request, String nodeId, String path) {
+		this.proxyPostRemote(ctx, request, nodeId, path, 0, 0);
+	}
+
+	private void proxyPostRemote(ChannelHandlerContext ctx, FullHttpRequest request, String nodeId, String path, int connectTimeout, int readTimeout) {
+		try {
+			String content = request.content().toString(CharsetUtil.UTF_8);
+			JsonObject body = content != null && !content.trim().isEmpty()
+					? JsonUtil.fromJson(content, JsonObject.class) : null;
+			if (body != null) {
+				body.remove("nodeId");
+				if (body.size() == 0) body = null;
+			}
+			NodeManager.HttpResult result;
+			if (connectTimeout > 0 && readTimeout > 0) {
+				result = NodeManager.getInstance().callRemoteApi(nodeId, "POST", path, body, connectTimeout, readTimeout);
+			} else {
+				result = NodeManager.getInstance().callRemoteApi(nodeId, "POST", path, body);
+			}
+			if (result.isSuccess()) {
+				NodeManager.writeHttpResultToChannel(ctx, result, "[llamacpp远程]");
+			} else {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: code=" + result.getStatusCode()));
+			}
+		} catch (Exception e) {
+			logger.warn("远程节点调用失败: nodeId={}, path={}, error={}", nodeId, path, e.getMessage());
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: " + e.getMessage()));
+		}
+	}
 	
 	/**
 	 * 	
@@ -505,6 +545,11 @@ public class LlamacppController implements BaseController {
 	private void handleLlamaCppTest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
 		this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
 		try {
+			String nodeId = ParamTool.getQueryParam(request.uri()).get("nodeId");
+			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+				this.proxyPostRemote(ctx, request, nodeId, "api/llamacpp/test", 5000, 15000);
+				return;
+			}
 			String content = request.content().toString(CharsetUtil.UTF_8);
 			if (content == null || content.trim().isEmpty()) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
