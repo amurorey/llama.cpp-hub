@@ -5085,6 +5085,7 @@
       const conversationId = state.currentConversationId || '';
       const assistant = getCurrentAssistant();
       const isRegenerate = options?.regenerateSeq != null;
+      let requestFailed = false;
       let nextAssistantIndex = Number.isInteger(options?.targetAssistantIndex) ? options.targetAssistantIndex : null;
       let requestModel = state.model;
       let currentAssistantIndex = nextAssistantIndex;
@@ -5275,6 +5276,7 @@
           }
           updateStatus('ready', window.I18N.t('page.chat.main.status.aborted', '已停止'), window.I18N.t('page.chat.main.status.aborted_short', '已停止'));
         } else {
+          requestFailed = true;
           if (Number.isInteger(currentAssistantIndex)) {
             updateLastAssistantMessage(window.I18N.t('page.chat.main.error.request_failed', '请求失败：{error}').replace('{error}', error.message || window.I18N.t('page.chat.main.misc.recording_error', '未知错误')), '', requestModel, null, currentAssistantIndex);
             setAssistantResponseStreaming(currentAssistantIndex, false);
@@ -5305,6 +5307,7 @@
           void generateConversationTitle(doneConversation);
         }
       }
+      return !requestFailed;
     }
 
     async function regenerateMessage(index) {
@@ -5356,6 +5359,7 @@
       let assistantMessageIndex = conversation.messages.length - 1;
       let truncatedMessages = null;
       let truncateEndIndex = userMessageIndex + 1;
+      let createdNewAssistant = false;
 
       if (message.role === 'assistant') {
         const assistantIdx = index;
@@ -5388,6 +5392,7 @@
           assistantMessageIndex = userMessageIndex + 1;
           truncateEndIndex = assistantMessageIndex + 1;
         } else {
+          createdNewAssistant = true;
           pushMessage('assistant', '', {
             model: state.model,
             isStreaming: true,
@@ -5418,13 +5423,31 @@
       const userMsg = conversation.messages[userMessageIndex];
       const userSeq = userMsg?.fragmentSeq != null ? userMsg.fragmentSeq : (userMsg?.order != null ? userMsg.order : null);
       const regenerateSeq = userSeq != null ? userSeq + 1 : null;
-      await requestAssistantResponse({
+      const success = await requestAssistantResponse({
         targetAssistantIndex: assistantMessageIndex,
         regenerateSeq
       });
       // Restore messages that were truncated during regenerate
       if (truncatedMessages && truncatedMessages.length > 0) {
         conversation.messages.push(...truncatedMessages);
+      }
+      // Rollback the draft response if the request failed
+      if (!success) {
+        if (createdNewAssistant) {
+          if (conversation.messages[conversation.messages.length - 1]?.role === 'assistant') {
+            conversation.messages.pop();
+          }
+        } else {
+          const assistantMessage = conversation.messages[assistantMessageIndex];
+          if (assistantMessage && assistantMessage.role === 'assistant' && Array.isArray(assistantMessage.responses)) {
+            assistantMessage.responses.pop();
+            assistantMessage.activeResponseIndex = Math.min(assistantMessage.activeResponseIndex, assistantMessage.responses.length - 1);
+            assistantMessage.isStreaming = false;
+            syncAssistantMessageState(assistantMessage);
+          }
+        }
+      }
+      if (!success || (truncatedMessages && truncatedMessages.length > 0)) {
         renderMessages();
         persistState();
       }
@@ -5446,9 +5469,10 @@
           Math.max(Number(message.activeResponseIndex || 0), 0),
           message.responses.length - 1
         );
+        let deleteResult = null;
         if (seq != null) {
           try {
-            await fetchJson(EASY_CHAT_DELETE_ENDPOINT, {
+            deleteResult = await fetchJson(EASY_CHAT_DELETE_ENDPOINT, {
               method: 'DELETE',
               headers: getHeaders(),
               body: JSON.stringify({ type: 'message', conversationId: conversation.id, seq, variantIndex: deleteIndex })
@@ -5465,7 +5489,10 @@
           responses: message.responses.slice()
         };
         nextMessage.responses.splice(deleteIndex, 1);
-        nextMessage.activeResponseIndex = Math.min(deleteIndex, nextMessage.responses.length - 1);
+        const backendActiveVariant = Number.isInteger(deleteResult?.data?.activeVariantIndex) ? deleteResult.data.activeVariantIndex : null;
+        nextMessage.activeResponseIndex = backendActiveVariant != null && backendActiveVariant >= 0
+          ? backendActiveVariant
+          : Math.min(deleteIndex, nextMessage.responses.length - 1);
         nextMessages[index] = nextMessage;
         setConversationMessages(nextMessages);
         showToast('info', window.I18N.t('page.chat.main.action.delete_response', '删除当前响应'));
@@ -6890,14 +6917,21 @@
         state.abortController.abort();
       }
       // Delete backend fragments
+      let deleteSucceeded = false;
       try {
         await fetchJson(EASY_CHAT_DELETE_ENDPOINT, {
           method: 'DELETE',
           headers: getHeaders(),
           body: JSON.stringify({ type: 'conversation', conversationId: id })
         });
+        deleteSucceeded = true;
       } catch (e) {
         console.warn('[EasyChat] 删除后端碎片失败', e);
+        showToast('error', window.I18N.t('page.chat.main.error.delete_failed', '删除失败'));
+        return;
+      }
+      if (!deleteSucceeded) {
+        return;
       }
       state.conversationMenuId = '';
       const previousConversations = state.conversations.slice();

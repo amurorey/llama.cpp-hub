@@ -70,6 +70,7 @@ public class EasyChatService {
 
 	private final ExecutorService worker = Executors.newVirtualThreadPerTaskExecutor();
 	private final Map<ChannelHandlerContext, TrackedConnection> channelConnectionMap = new ConcurrentHashMap<>();
+	private final Map<ChannelHandlerContext, EasyChatGlobalLock.Lease> channelLeaseMap = new ConcurrentHashMap<>();
 	private final Map<String, Object> conversationLocks = new ConcurrentHashMap<>();
 	private final EasyChatStorage storage = new EasyChatStorage();
 	private final EasyChatRequestWriter requestWriter = new EasyChatRequestWriter(storage);
@@ -121,16 +122,27 @@ public class EasyChatService {
 	 * then dispatches async processing.
 	 */
 	public void handleStreamChat(ChannelHandlerContext ctx, FullHttpRequest request) {
+		if (request.method() != HttpMethod.POST) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("只支持POST请求"));
+			return;
+		}
+
+		// Drain any streaming body temp file early so it is always cleaned up.
+		Path streamingBodyFile = ctx.channel().attr(EasyChatStreamingHandler.STREAMING_BODY_FILE).getAndSet(null);
 		EasyChatGlobalLock.Lease globalLease = null;
 		try {
-			if (request.method() != HttpMethod.POST) {
-				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("只支持POST请求"));
-				return;
-			}
 			globalLease = acquireGlobalLease(ctx, "chat.stream");
 			if (globalLease == null) {
 				return;
 			}
+			channelLeaseMap.put(ctx, globalLease);
+
+			// Client already disconnected: abort immediately.
+			if (!ctx.channel().isActive()) {
+				logger.info("[EasyChat] channel已关闭，取消stream-chat请求");
+				return;
+			}
+
         // Read metadata from headers
             String hdrConvId = decodeHeader(request.headers().get("X-Conversation-Id"));
             String conversationId = (hdrConvId != null) ? hdrConvId : "";
@@ -149,8 +161,7 @@ public class EasyChatService {
       String hdrAsstName = decodeHeader(request.headers().get("X-Assistant-Name"));
             String assistantName = (hdrAsstName != null) ? hdrAsstName : "";
 
-			// Check if body was streamed to a temp file by EasyChatStreamingHandler
-			Path streamingBodyFile = ctx.channel().attr(EasyChatStreamingHandler.STREAMING_BODY_FILE).getAndSet(null);
+			// streamingBodyFile was read at method entry
 
 			// Read body bytes directly (no JSON parsing) — only if not from streaming file
 			byte[] bodyBytes;
@@ -379,23 +390,32 @@ public class EasyChatService {
 					// Ephemeral: read from file for transient body
 					transientBodyBytes = Files.readAllBytes(streamingBodyFile);
 				}
-				// Delete temp file after fragment write or ephemeral read
-				try {
-					Files.deleteIfExists(streamingBodyFile);
-				} catch (IOException e) {
-					logger.warn("[EasyChat][Streaming] 删除临时文件失败: {}", streamingBodyFile, e);
-				}
+				cleanupStreamingBodyFile(streamingBodyFile);
+				streamingBodyFile = null;
 			}
 			final byte[] finalTransientBodyBytes = transientBodyBytes;
 			final boolean finalRequestStream = requestStream;
 
+			// If the client left while we were preparing the request, do not start the worker.
+			if (!ctx.channel().isActive()) {
+				logger.info("[EasyChat] channel在提交任务前已关闭，取消生成");
+				return;
+			}
+
 			// Dispatch to worker thread
+			channelLeaseMap.remove(ctx);
 			final EasyChatGlobalLock.Lease finalGlobalLease = globalLease;
 			worker.execute(() -> {
 				HttpURLConnection connection = null;
 				StreamAccumulator accumulator = new StreamAccumulator();
 				Path indexPath = finalConvDir == null ? null : storage.indexFile(finalConvDir);
 				try {
+					// Double-check cancellation after acquiring a worker thread.
+					if (!ctx.channel().isActive()) {
+						logger.info("[EasyChat] worker启动时channel已关闭，直接退出");
+						return;
+					}
+
 					if (finalIsRemoteNode) {
 						handleRemoteNodeRequest(ctx, conversationId, finalNodeId, finalModelId,
 							finalSystemPrompt, finalConvDir, finalToolsBytes, finalSamplingParams,
@@ -519,8 +539,10 @@ public class EasyChatService {
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("处理失败: " + e.getMessage()));
 		} finally {
 			if (globalLease != null) {
+				channelLeaseMap.remove(ctx);
 				globalLease.close();
 			}
+			cleanupStreamingBodyFile(streamingBodyFile);
 		}
 	}
 
@@ -763,6 +785,17 @@ public class EasyChatService {
 		}
 	}
 
+	private void cleanupStreamingBodyFile(Path file) {
+		if (file == null) {
+			return;
+		}
+		try {
+			Files.deleteIfExists(file);
+		} catch (IOException e) {
+			logger.warn("[EasyChat][Streaming] 清理临时文件失败: {}", file, e);
+		}
+	}
+
    /**
      * Create a FileOutputStream for request logging.
      * Returns null if ENABLE_REQUEST_LOG is false or file creation fails (non-fatal).
@@ -837,7 +870,12 @@ public class EasyChatService {
 		}
 		storage.writeFragment(convDir, aiSeq, System.currentTimeMillis(), aiBytes);
 		if (indexPath != null) {
-			storage.writeIndexSeq(indexPath, aiSeq + 1);
+			long currentIndexSeq = storage.readIndexSeq(indexPath);
+			if (currentIndexSeq <= aiSeq + 1) {
+				storage.writeIndexSeq(indexPath, aiSeq + 1);
+			} else {
+				logger.warn("[EasyChat] regenerate目标碎片不存在但indexSeq更大，避免截断历史 seq={} currentIndexSeq={}", aiSeq, currentIndexSeq);
+			}
 		}
 		return true;
 	}
@@ -1213,7 +1251,7 @@ public class EasyChatService {
 	/**
 	 * Delete a whole message or a single variant within a message.
 	 */
-	public void deleteMessage(String conversationId, long seq, Integer variantIndex) throws Exception {
+	public Integer deleteMessage(String conversationId, long seq, Integer variantIndex) throws Exception {
 		Path dir = storage.getConversationDir(conversationId);
 		if (!Files.exists(dir)) {
 			throw new IOException("Conversation directory not found: " + conversationId);
@@ -1221,9 +1259,10 @@ public class EasyChatService {
 		Object convLock = conversationLocks.computeIfAbsent(conversationId, k -> new Object());
 		synchronized (convLock) {
 			if (variantIndex != null) {
-				storage.deleteVariant(dir, seq, variantIndex);
+				return storage.deleteVariant(dir, seq, variantIndex);
 			} else {
 				storage.deleteMessage(dir, seq);
+				return null;
 			}
 		}
 	}
@@ -1507,8 +1546,16 @@ public class EasyChatService {
 
 	/**
 	 * Clean up tracked connection on channel inactive.
+	 * Also releases the global lease if the request has not yet been handed off to the worker.
 	 */
 	public void channelInactive(ChannelHandlerContext ctx) {
 		cleanupConnection(ctx);
+		EasyChatGlobalLock.Lease lease = channelLeaseMap.remove(ctx);
+		if (lease != null) {
+			try {
+				lease.close();
+			} catch (Exception ignore) {
+			}
+		}
 	}
 }

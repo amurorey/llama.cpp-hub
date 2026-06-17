@@ -225,7 +225,12 @@ public class ChatStateController implements BaseController {
 				if (body.has("variantIndex") && !body.get("variantIndex").isJsonNull()) {
 					variantIndex = body.get("variantIndex").getAsInt();
 				}
-				service.deleteMessage(conversationId, seq, variantIndex);
+				Integer newActiveVariant = service.deleteMessage(conversationId, seq, variantIndex);
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.success(Map.of(
+					"deleted", true,
+					"activeVariantIndex", newActiveVariant != null ? newActiveVariant : -1
+				)));
+				return;
 			} else {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("未知的 type: " + type));
 				return;

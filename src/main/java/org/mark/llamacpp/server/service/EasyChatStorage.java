@@ -204,7 +204,7 @@ final class EasyChatStorage {
 		writeFlags(file, header.flags & ~FRAG_FLAGS_DELETED);
 	}
 
-	void deleteVariant(Path dir, long seq, int variantIndex) throws IOException {
+	int deleteVariant(Path dir, long seq, int variantIndex) throws IOException {
 		Path file = fragmentFile(dir, seq);
 		FragmentHeader header = requireHeader(file, seq);
 		if (variantIndex < 0 || variantIndex >= header.variantCount) {
@@ -215,7 +215,7 @@ final class EasyChatStorage {
 		int newCount = header.variantCount - 1;
 		if (newCount <= 0) {
 			writeFlags(file, header.flags | FRAG_FLAGS_DELETED);
-			return;
+			return -1;
 		}
 		byte[][] nextPayloads = new byte[newCount][];
 		int[] nextLengths = new int[FRAG_MAX_VARIANTS];
@@ -236,6 +236,7 @@ final class EasyChatStorage {
 		}
 		header.lengths = nextLengths;
 		rewriteFragmentFile(file, header, nextPayloads, newCount, nextActive, header.flags & ~FRAG_FLAGS_DELETED);
+		return nextActive;
 	}
 
 	byte[] readPayload(Path dir, long seq, int variantIndex) throws IOException {

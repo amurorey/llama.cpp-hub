@@ -37,6 +37,11 @@ public class EasyChatController implements BaseController {
 	private static final String PATH_MESSAGE_UPDATE = "/api/chat/message/update";
 
 	@Override
+	public void inactive(ChannelHandlerContext ctx) {
+		EasyChatService.getInstance().channelInactive(ctx);
+	}
+
+	@Override
 	public boolean handleRequest(String uri, ChannelHandlerContext ctx, FullHttpRequest request)
 			throws RequestMethodException {
 		if (uri.startsWith(PATH_STREAM_CHAT)) {
