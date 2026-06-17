@@ -26,6 +26,16 @@ public class ComputerService {
 	 * 获取 CPU 型号
 	 */
 	public static String getCPUModel() {
+		// 1. GPUInfoHelper
+		try {
+			JsonObject cpuInfo = GPUInfoHelper.getInstance().getCpuInfo();
+			if (cpuInfo != null && cpuInfo.has("name")) {
+				String name = cpuInfo.get("name").getAsString();
+				if (name != null && !name.trim().isEmpty()) return name.trim();
+			}
+		} catch (Exception e) { /* fallback */ }
+
+		// 2. Fallback
 		try {
 			String os = System.getProperty("os.name").toLowerCase();
 			if (os.contains("win")) {
@@ -123,51 +133,20 @@ public class ComputerService {
 	 * 获取物理内存大小（单位：GB）
 	 */
 	public static long getPhysicalMemoryKB() {
+		// 1. GPUInfoHelper
 		try {
-			ProcessBuilder pb;
-			String os = System.getProperty("os.name").toLowerCase();
-			if (os.contains("win")) {
-				pb = new ProcessBuilder("wmic", "os", "get", "TotalVisibleMemorySize");
-			} else if (os.contains("linux")) {
-				pb = new ProcessBuilder("grep", "MemTotal", "/proc/meminfo");
-			} else {
-				return -1;
+			JsonObject ramInfo = GPUInfoHelper.getInstance().getRamInfo();
+			if (ramInfo != null && ramInfo.has("total_bytes")) {
+				long bytes = ramInfo.get("total_bytes").getAsLong();
+				if (bytes > 0) return bytes / 1024;
 			}
-			Process process = pb.start();
-			BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-			StringBuilder output = new StringBuilder();
-			String line;
-			while ((line = reader.readLine()) != null) {
-				output.append(line).append("\n");
-			}
-			process.waitFor();
-			String rawOutput = output.toString().trim();
-			if (os.contains("win")) {
-				// Windows: 跳过标题行，取第一个非空行
-				String[] lines = rawOutput.split("\n");
-				for (int i = 1; i < lines.length; i++) {
-					String str = lines[i].trim();
-					if (!str.isEmpty()) {
-						long kb = Long.parseLong(str);
-						return kb;
-					}
-				}
-			} else if (os.contains("linux")) {
-				// Linux: 提取数字
-				for (String l : rawOutput.split("\n")) {
-					String[] parts = l.split(":");
-					if (parts.length > 1) {
-						String numStr = parts[1].trim().replace("kB", "").trim();
-						if (!numStr.isEmpty()) {
-							long kb = Long.parseLong(numStr);
-							return kb;
-						}
-					}
-				}
-			}
-			return -1;
+		} catch (Exception e) { /* fallback */ }
+		// 2. JMX
+		try {
+			com.sun.management.OperatingSystemMXBean osBean =
+					(com.sun.management.OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+			return osBean.getTotalMemorySize() / 1024;
 		} catch (Exception e) {
-			e.printStackTrace();
 			return -1;
 		}
 	}
@@ -176,42 +155,17 @@ public class ComputerService {
 	 * 获取 CPU 核心数
 	 */
 	public static int getCPUCoreCount() {
+		// 1. GPUInfoHelper (physical cores)
 		try {
-			ProcessBuilder pb;
-			String os = System.getProperty("os.name").toLowerCase();
-			if (os.contains("win")) {
-				pb = new ProcessBuilder("wmic", "cpu", "get", "NumberOfCores");
-			} else if (os.contains("linux")) {
-				pb = new ProcessBuilder("nproc");
-			} else {
-				return -1;
+			JsonObject cpuInfo = GPUInfoHelper.getInstance().getCpuInfo();
+			if (cpuInfo != null && cpuInfo.has("cores")) {
+				return cpuInfo.get("cores").getAsInt();
 			}
-			Process process = pb.start();
-			BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-			StringBuilder output = new StringBuilder();
-			String line;
-			while ((line = reader.readLine()) != null) {
-				output.append(line).append("\n");
-			}
-			process.waitFor();
-			String rawOutput = output.toString().trim();
-			if (os.contains("win")) {
-				// Windows: 跳过标题行，取第一个非空行
-				String[] lines = rawOutput.split("\n");
-				for (int i = 1; i < lines.length; i++) {
-					String str = lines[i].trim();
-					if (!str.isEmpty()) {
-						return Integer.parseInt(str);
-					}
-				}
-			} else if (os.contains("linux")) {
-				if (!rawOutput.isEmpty()) {
-					return Integer.parseInt(rawOutput.trim());
-				}
-			}
-			return -1;
+		} catch (Exception e) { /* fallback */ }
+		// 2. Java API
+		try {
+			return Runtime.getRuntime().availableProcessors();
 		} catch (Exception e) {
-			e.printStackTrace();
 			return -1;
 		}
 	}

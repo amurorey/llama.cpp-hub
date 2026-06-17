@@ -160,7 +160,15 @@ public class GPUInfoHelper {
 	}
 
 	private String execJson() throws IOException {
-		ProcessBuilder pb = new ProcessBuilder(exePath, "--json");
+		return execJsonWithFlags();
+	}
+
+	private String execJsonWithFlags(String... extraFlags) throws IOException {
+		String[] cmd = new String[2 + extraFlags.length];
+		cmd[0] = exePath;
+		cmd[1] = "--json";
+		System.arraycopy(extraFlags, 0, cmd, 2, extraFlags.length);
+		ProcessBuilder pb = new ProcessBuilder(cmd);
 		pb.redirectErrorStream(true);
 		Process process = pb.start();
 
@@ -189,29 +197,35 @@ public class GPUInfoHelper {
 	 * 执行 gpu-info --json --memory 命令，获取包含内存信息的 JSON 输出。
 	 */
 	private String execJsonWithMemory() throws IOException {
-		ProcessBuilder pb = new ProcessBuilder(exePath, "--json", "--memory");
-		pb.redirectErrorStream(true);
-		Process process = pb.start();
+		return execJsonWithFlags("--memory");
+	}
 
-		StringBuilder output = new StringBuilder();
-		try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				output.append(line).append('\n');
-			}
-		}
-
+	public JsonObject getCpuInfo() {
 		try {
-			int exitCode = process.waitFor();
-			if (exitCode != 0) {
-				throw new IOException("gpu-info exited with code " + exitCode + ": " + output);
+			if (!isAvailable()) return null;
+			String output = execJsonWithFlags("--cpu");
+			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
+			if (root != null && root.has("system")) {
+				return root.getAsJsonObject("system").getAsJsonObject("cpu");
 			}
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-			throw new IOException("gpu-info execution interrupted", e);
+		} catch (Exception e) {
+			logger.info("[自动加载] gpu-info --cpu 执行异常: {}", e.getMessage());
 		}
+		return null;
+	}
 
-		return output.toString();
+	public JsonObject getRamInfo() {
+		try {
+			if (!isAvailable()) return null;
+			String output = execJsonWithFlags("--ram");
+			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
+			if (root != null && root.has("system")) {
+				return root.getAsJsonObject("system").getAsJsonObject("memory");
+			}
+		} catch (Exception e) {
+			logger.info("[自动加载] gpu-info --ram 执行异常: {}", e.getMessage());
+		}
+		return null;
 	}
 
 	/**
