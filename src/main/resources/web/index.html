@@ -198,6 +198,20 @@
             display: flex;
         }
 
+        #sysinfoTabContainer > .console-tab-panel {
+            position: absolute;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
+            overflow: hidden;
+            display: none;
+        }
+
+        #sysinfoTabContainer > .console-tab-panel.active {
+            display: flex;
+        }
+
         /* === Console Model List === */
         .console-tab-container {
             display: flex;
