@@ -289,6 +289,8 @@
   "modal.console.auto_refresh": "Auto refresh",
   "modal.console.interval_ms": "Interval (ms)",
   "modal.console.title": "Console Logs",
+  "modal.console.all_logs": "All Logs",
+  "modal.console.system_logs": "System Logs",
   "modal.download_create.filename_desc": "Optional: set a filename; otherwise infer from URL",
   "modal.download_create.filename_optional": "Filename (optional)",
   "modal.download_create.filename_placeholder": "e.g. model.gguf",

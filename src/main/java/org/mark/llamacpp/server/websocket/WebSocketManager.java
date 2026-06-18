@@ -232,13 +232,12 @@ public class WebSocketManager {
     public void sendConsoleLineEvent(String modelId, String line) {
         byte[] bytes = line == null ? new byte[0] : line.getBytes(StandardCharsets.UTF_8);
         String b64 = Base64.getEncoder().encodeToString(bytes);
-        String eventMessage = String.format(
-            "{\"type\":\"console\",\"modelId\":\"%s\",\"line64\":\"%s\",\"timestamp\":%d}",
-            modelId != null ? modelId.replace("\"", "\\\"") : "",
-            b64,
-            System.currentTimeMillis()
-        );
-        broadcast(eventMessage);
+        JsonObject eventMessage = new JsonObject();
+        eventMessage.addProperty("type", "console");
+        eventMessage.addProperty("modelId", modelId != null ? modelId : "");
+        eventMessage.addProperty("line64", b64);
+        eventMessage.addProperty("timestamp", System.currentTimeMillis());
+        broadcast(JsonUtil.toJson(eventMessage));
     }
     
     /**

@@ -6,6 +6,7 @@
     let snapshotInFlight = false;
     let logBuffer = [];
     let currentFilter = '';
+    let currentFilterNodeId = 'local';
     let snapshotText = '';
     let modelSnapshots = {};
     const MAX_BUFFER = 5000;
@@ -15,19 +16,32 @@
         return (modelId || 'system') === currentFilter;
     }
 
-    function setLogFilter(filter) {
-        currentFilter = filter || '';
+    function getCacheKey() {
+        if (!currentFilter) return '';
+        if (currentFilter === 'system') return 'system';
+        if (currentFilterNodeId && currentFilterNodeId !== 'local') return currentFilter + '|||' + currentFilterNodeId;
+        return currentFilter;
+    }
+
+    function setLogFilter(filter, nodeId) {
+        const plainModelId = filter && filter.includes('|||') ? filter.split('|||')[0] : (filter || '');
+        currentFilter = plainModelId;
+        currentFilterNodeId = nodeId || 'local';
         const sel = document.getElementById('logFilterSelect');
-        if (sel) sel.value = currentFilter;
-        if (currentFilter && currentFilter !== 'system' && !modelSnapshots[currentFilter]) {
-            fetch('/api/sys/model-log?modelId=' + encodeURIComponent(currentFilter))
+        if (sel) sel.value = filter || '';
+        const cacheKey = getCacheKey();
+        if (currentFilter && currentFilter !== 'system' && !modelSnapshots[cacheKey]) {
+            const url = currentFilterNodeId !== 'local'
+                ? '/api/sys/model-log?modelId=' + encodeURIComponent(currentFilter) + '&nodeId=' + encodeURIComponent(currentFilterNodeId)
+                : '/api/sys/model-log?modelId=' + encodeURIComponent(currentFilter);
+            fetch(url)
                 .then(function (r) { return r.text(); })
                 .then(function (text) {
-                    modelSnapshots[currentFilter] = text || '';
+                    modelSnapshots[cacheKey] = text || '';
                     renderFiltered();
                 })
                 .catch(function () {
-                    modelSnapshots[currentFilter] = '';
+                    modelSnapshots[cacheKey] = '';
                     renderFiltered();
                 });
         }
@@ -40,10 +54,11 @@
         const stay = nearBottom(els.container);
         let chunk = '';
         let matched = 0;
+        const cacheKey = getCacheKey();
         if (!currentFilter || currentFilter === 'system') {
             chunk = snapshotText || '';
-        } else if (modelSnapshots[currentFilter]) {
-            chunk = modelSnapshots[currentFilter];
+        } else if (cacheKey && modelSnapshots[cacheKey]) {
+            chunk = modelSnapshots[cacheKey];
         }
         for (let i = 0; i < logBuffer.length; i++) {
             if (matchFilter(logBuffer[i].modelId)) {
@@ -98,7 +113,7 @@
         const els = getEls();
         if (!els.modal) return;
         els.modal.classList.add('show');
-        if (typeof populateLogFilter === 'function') populateLogFilter();
+        if (typeof populateLogFilter === 'function') populateLogFilter('local');
         fetchConsole().finally(() => {
             setTimeout(() => scrollBottom(els.container), 120);
         });

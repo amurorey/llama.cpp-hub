@@ -2180,12 +2180,25 @@ public class SystemController implements BaseController {
 	private void handleLogModelsRequest(ChannelHandlerContext ctx, FullHttpRequest request) throws RequestMethodException {
 		this.assertRequestMethod(request.method() != HttpMethod.GET, "只支持GET请求");
 		try {
+			Map<String, String> params = ParamTool.getQueryParam(request.uri());
+			String nodeId = params.get("nodeId");
+			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+				NodeManager.HttpResult result = NodeManager.getInstance().callRemoteApi(
+						nodeId, "GET", "api/sys/log-models", null);
+				if (result.isSuccess()) {
+					LlamaServer.sendJsonResponse(ctx, com.google.gson.JsonParser.parseString(result.getBody()));
+				} else {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: code=" + result.getStatusCode()));
+				}
+				return;
+			}
 			Path logDir = Paths.get("logs");
 			List<String> modelIds = new ArrayList<>();
 			if (Files.exists(logDir)) {
 				try (Stream<Path> files = Files.list(logDir)) {
 					modelIds = files
-						.filter(p -> p.toString().endsWith(".log"))
+						.filter(Files::isRegularFile)
+						.filter(name -> name.endsWith(".log"))
 						.map(p -> p.getFileName().toString())
 						.filter(name -> !name.equals("app.log"))
 						.map(name -> name.substring(0, name.length() - 4))
@@ -2208,7 +2221,18 @@ public class SystemController implements BaseController {
 		this.assertRequestMethod(request.method() != HttpMethod.GET, "只支持GET请求");
 		try {
 			Map<String, String> params = ParamTool.getQueryParam(request.uri());
+			String nodeId = params.get("nodeId");
 			String modelId = params.get("modelId");
+			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
+				NodeManager.HttpResult result = NodeManager.getInstance().callRemoteApi(
+						nodeId, "GET", "api/sys/model-log?modelId=" + java.net.URLEncoder.encode(modelId, java.nio.charset.StandardCharsets.UTF_8), null);
+				if (result.isSuccess()) {
+					LlamaServer.sendTextResponse(ctx, result.getBody());
+				} else {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: code=" + result.getStatusCode()));
+				}
+				return;
+			}
 			if (modelId == null || modelId.isBlank()) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少modelId参数"));
 				return;

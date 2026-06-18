@@ -395,6 +395,7 @@ public class LlamaServer {
 	private static final int CONSOLE_BUFFER_MAX_BYTES = 256 * 1024;
 	private static final Object CONSOLE_BUFFER_LOCK = new Object();
 	private static final StringBuilder CONSOLE_BUFFER = new StringBuilder();
+	private static final DateTimeFormatter CONSOLE_TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
 
 
 	
@@ -1132,12 +1133,22 @@ public class LlamaServer {
     }
 
     public static String getModelLogText(String modelId) {
+        if (modelId == null || modelId.isBlank()) {
+            return "";
+        }
         String safeId = modelId.replaceAll("[^a-zA-Z0-9_\\-.]", "_");
-        Path logFile = LOG_DIR.resolve(safeId + ".log");
+        if (safeId.isBlank() || ".".equals(safeId) || "..".equals(safeId)) {
+            return "";
+        }
+        Path logFile = LOG_DIR.resolve(safeId + ".log").normalize();
+        if (!logFile.startsWith(LOG_DIR.toAbsolutePath().normalize())) {
+            return "";
+        }
         try {
-            if (!Files.exists(logFile)) return "";
+            if (!Files.exists(logFile) || !Files.isRegularFile(logFile)) return "";
             return readTailUtf8(logFile, CONSOLE_BUFFER_MAX_BYTES);
         } catch (Exception e) {
+            logger.warn("读取模型日志失败: modelId={}, path={}", modelId, logFile, e);
             return "";
         }
     }
@@ -1252,8 +1263,9 @@ public class LlamaServer {
     
     public static void sendConsoleLineEvent(String modelId, String line) {
         String formatted = line;
-        if (modelId != null && !modelId.isEmpty()) {
-            formatted = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")) + " - " + line;
+        // 仅对真实模型日志追加时间戳；system 日志本身已带 Log4j2 时间戳，避免重复
+        if (modelId != null && !modelId.isEmpty() && !"system".equals(modelId)) {
+            formatted = LocalDateTime.now().format(CONSOLE_TIMESTAMP_FORMATTER) + " - " + line;
         }
         appendConsoleBufferLine(formatted);
         WebSocketManager.getInstance().sendConsoleLineEvent(modelId, formatted);

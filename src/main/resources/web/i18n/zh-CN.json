@@ -289,6 +289,8 @@
   "modal.console.auto_refresh": "自动刷新",
   "modal.console.interval_ms": "间隔(ms)",
   "modal.console.title": "控制台日志",
+  "modal.console.all_logs": "全部日志",
+  "modal.console.system_logs": "系统日志",
   "modal.download_create.filename_desc": "可选：自定义文件名，不填则自动从 URL 推断",
   "modal.download_create.filename_optional": "文件名（可选）",
   "modal.download_create.filename_placeholder": "例如：model.gguf",

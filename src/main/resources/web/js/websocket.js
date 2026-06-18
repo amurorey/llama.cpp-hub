@@ -3,6 +3,7 @@ let reconnectAttempts = 0;
 const reconnectInterval = 1000;
 const wsDecoder = new TextDecoder('utf-8');
 let reconnectTimer = null;
+let populateLogFilterGen = 0;
 
 window.remoteNodes = [];
 
@@ -102,7 +103,7 @@ function handleWebSocketMessage(message) {
                         }
                         if (!text) break;
                         if (data.nodeId && typeof appendRemoteLogLine === 'function') {
-                            appendRemoteLogLine(data.nodeId, text);
+                            appendRemoteLogLine(data.nodeId, text, data.modelId || 'system');
                         } else if (typeof appendLogLine === 'function') {
                             appendLogLine(text, data.timestamp, data.modelId || 'system');
                         }
@@ -198,45 +199,86 @@ function handleModelBusyEvent(data) {
     applyModelPatch(data.modelId, { busy: !!data.busy }, data.nodeId);
 }
 
-async function populateLogFilter() {
+async function populateLogFilter(activeNodeId) {
+    const gen = ++populateLogFilterGen;
     const sel = document.getElementById('logFilterSelect');
     if (!sel) return;
     const current = sel.value;
     while (sel.options.length > 2) sel.remove(2);
     const seen = {};
     if (Array.isArray(currentModelsData)) {
-        currentModelsData.forEach(function (m) {
+        currentModelsData.slice().sort(function (a, b) {
+            if (a && a.isLoaded && !(b && b.isLoaded)) return -1;
+            if (!(a && a.isLoaded) && b && b.isLoaded) return 1;
+            return 0;
+        }).forEach(function (m) {
             if (m && m.id) {
-                seen[m.id] = true;
+                const mNodeId = m.nodeId || 'local';
+                if (activeNodeId && mNodeId !== activeNodeId) return;
+                const key = m.id + '|||' + mNodeId;
+                seen[key] = true;
                 const opt = document.createElement('option');
-                opt.value = m.id;
-                opt.textContent = (m.alias || m.id) + (m.isLoaded ? '' : ' (offline)');
+                opt.value = key;
+                opt.dataset.nodeId = mNodeId;
+                if (mNodeId !== 'local') {
+                    const node = (window.remoteNodes || []).find(function (n) { return n.nodeId === mNodeId; });
+                    opt.textContent = (m.alias || m.id) + ' (' + (node ? (node.name || mNodeId) : mNodeId) + ')' + (m.isLoaded ? '' : ' (offline)');
+                } else {
+                    opt.textContent = (m.alias || m.id) + (m.isLoaded ? '' : ' (offline)');
+                }
                 sel.appendChild(opt);
             }
         });
     }
     try {
-        const resp = await fetch('/api/sys/log-models');
-        const data = await resp.json();
-        if (data.success && Array.isArray(data.data)) {
-            data.data.forEach(function (id) {
-                if (!seen[id]) {
-                    seen[id] = true;
+        const fetchLogModels = async function (nodeId) {
+            try {
+                const url = nodeId ? '/api/sys/log-models?nodeId=' + encodeURIComponent(nodeId) : '/api/sys/log-models';
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (data.success && Array.isArray(data.data)) {
+                    return { ids: data.data, nodeId: nodeId || 'local' };
+                }
+            } catch (e) {}
+            return null;
+        };
+        const nodesToFetch = activeNodeId
+            ? (activeNodeId !== 'local' ? (window.remoteNodes || []).filter(function (n) { return n.nodeId === activeNodeId && n.enabled !== false; }).map(function (n) { return n.nodeId; }) : [null])
+            : [null, ...(window.remoteNodes || []).filter(function (n) { return n.enabled !== false; }).map(function (n) { return n.nodeId; })];
+        const results = await Promise.all(nodesToFetch.map(function (nid) { return fetchLogModels(nid); }));
+        if (gen !== populateLogFilterGen) return;
+        results.forEach(function (res) {
+            if (!res) return;
+            const nodeId = res.nodeId;
+            res.ids.forEach(function (id) {
+                const key = id + '|||' + nodeId;
+                if (!seen[key]) {
+                    seen[key] = true;
                     const opt = document.createElement('option');
-                    opt.value = id;
-                    opt.textContent = id + ' (offline)';
+                    opt.value = key;
+                    opt.dataset.nodeId = nodeId;
+                    if (nodeId !== 'local') {
+                        const node = (window.remoteNodes || []).find(function (n) { return n.nodeId === nodeId; });
+                        opt.textContent = id + ' (' + (node ? (node.name || nodeId) : nodeId) + ') (offline)';
+                    } else {
+                        opt.textContent = id + ' (offline)';
+                    }
                     sel.appendChild(opt);
                 }
             });
-        }
+        });
     } catch (e) {}
-    sel.value = current;
+    if (gen === populateLogFilterGen) {
+        sel.value = current;
+    }
 }
 
 document.addEventListener('change', function (e) {
     if (e.target && e.target.id === 'logFilterSelect') {
         if (typeof setLogFilter === 'function') {
-            setLogFilter(e.target.value);
+            const opt = e.target.options[e.target.selectedIndex];
+            const nodeId = opt && opt.dataset.nodeId ? opt.dataset.nodeId : 'local';
+            setLogFilter(e.target.value, nodeId);
         }
     }
 });

@@ -4,41 +4,93 @@
     const consoleStatusText = document.getElementById('consoleStatusText');
     const refreshConsoleBtn = document.getElementById('refreshConsoleBtn');
 
-    let pendingLogs = [];
-    let pendingLogsWithTs = [];
     let flushScheduled = false;
     let snapshotInFlight = false;
-    let remotePending = {};
     let remoteSnapshotInFlight = {};
+    let activeNodeTab = 'local';
+    let remoteLogBuffers = {};
+    let remoteSnapshots = {};
+    const REMOTE_MAX_BUFFER = 5000;
 
     let logBuffer = [];
     let currentFilter = '';
+    let currentFilterNodeId = 'local';
     let snapshotText = '';
     let modelSnapshots = {};
     const MAX_BUFFER = 10000;
+    const MAX_MODEL_SNAPSHOTS = 20;
+    const MODEL_SNAPSHOT_TRIM_TO = 10;
+    let consoleInitialized = false;
+
+    function getValidNodeIds() {
+        var ids = { local: true };
+        (window.remoteNodes || []).forEach(function (n) {
+            if (n && n.nodeId) ids[n.nodeId] = true;
+        });
+        return ids;
+    }
+
+    function cleanupStaleRemoteState() {
+        var valid = getValidNodeIds();
+        [remoteLogBuffers, remoteSnapshots, remoteSnapshotInFlight].forEach(function (map) {
+            Object.keys(map).forEach(function (key) {
+                if (!valid[key]) delete map[key];
+            });
+        });
+        Object.keys(modelSnapshots).forEach(function (key) {
+            var nodeId = key.indexOf('|||') >= 0 ? key.split('|||')[1] : 'local';
+            if (!valid[nodeId]) delete modelSnapshots[key];
+        });
+    }
+
+    function trimModelSnapshots() {
+        var keys = Object.keys(modelSnapshots);
+        if (keys.length <= MAX_MODEL_SNAPSHOTS) return;
+        var removeCount = keys.length - MODEL_SNAPSHOT_TRIM_TO;
+        for (var i = 0; i < removeCount; i++) {
+            delete modelSnapshots[keys[i]];
+        }
+    }
 
     function matchFilter(modelId) {
         if (!currentFilter) return true;
         return (modelId || 'system') === currentFilter;
     }
 
-    function setLogFilter(filter) {
-        currentFilter = filter || '';
+    function getCacheKey() {
+        if (!currentFilter) return '';
+        if (currentFilter === 'system') return 'system';
+        if (currentFilterNodeId && currentFilterNodeId !== 'local') return currentFilter + '|||' + currentFilterNodeId;
+        return currentFilter;
+    }
+
+    function setLogFilter(filter, nodeId) {
+        const plainModelId = filter && filter.includes('|||') ? filter.split('|||')[0] : (filter || '');
+        currentFilter = plainModelId;
+        currentFilterNodeId = nodeId || 'local';
         const sel = document.getElementById('logFilterSelect');
-        if (sel) sel.value = currentFilter;
-        if (currentFilter && currentFilter !== 'system' && !modelSnapshots[currentFilter]) {
-            fetch('/api/sys/model-log?modelId=' + encodeURIComponent(currentFilter))
+        if (sel) sel.value = filter || '';
+        const cacheKey = getCacheKey();
+        if (currentFilter && currentFilter !== 'system' && !modelSnapshots[cacheKey]) {
+            const url = currentFilterNodeId !== 'local'
+                ? '/api/sys/model-log?modelId=' + encodeURIComponent(currentFilter) + '&nodeId=' + encodeURIComponent(currentFilterNodeId)
+                : '/api/sys/model-log?modelId=' + encodeURIComponent(currentFilter);
+            fetch(url)
                 .then(function (r) { return r.text(); })
                 .then(function (text) {
-                    modelSnapshots[currentFilter] = text || '';
+                    modelSnapshots[cacheKey] = text || '';
+                    trimModelSnapshots();
                     renderFiltered();
+                    if (activeNodeTab !== 'local') renderRemoteFiltered(activeNodeTab);
                 })
                 .catch(function () {
-                    modelSnapshots[currentFilter] = '';
+                    modelSnapshots[cacheKey] = '';
                     renderFiltered();
+                    if (activeNodeTab !== 'local') renderRemoteFiltered(activeNodeTab);
                 });
         }
         renderFiltered();
+        if (activeNodeTab !== 'local') renderRemoteFiltered(activeNodeTab);
     }
 
     function renderFiltered() {
@@ -46,10 +98,11 @@
         const atBottom = nearBottom();
         let chunk = '';
         let matched = 0;
+        const cacheKey = getCacheKey();
         if (!currentFilter || currentFilter === 'system') {
             chunk = snapshotText || '';
-        } else if (modelSnapshots[currentFilter]) {
-            chunk = modelSnapshots[currentFilter];
+        } else if (cacheKey && modelSnapshots[cacheKey]) {
+            chunk = modelSnapshots[cacheKey];
         }
         for (let i = 0; i < logBuffer.length; i++) {
             if (matchFilter(logBuffer[i].modelId)) {
@@ -63,6 +116,33 @@
             consoleStatusText.textContent = 'Filter: ' + label + ' · Lines: ' + matched + '/' + logBuffer.length;
         }
         if (atBottom) scrollBottom();
+    }
+
+    function renderRemoteFiltered(nodeId) {
+        if (!nodeId || nodeId === 'local') return;
+        var pre = document.getElementById('remoteConsoleContent-' + nodeId);
+        if (!pre) return;
+        var container = document.getElementById('remoteLogContainer-' + nodeId);
+        var atBottom = container ? Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 50 : true;
+        var chunk = '';
+        if (!currentFilter || currentFilter === 'system') {
+            chunk = remoteSnapshots[nodeId] || '';
+        } else {
+            var cacheKey = getCacheKey();
+            if (cacheKey && modelSnapshots[cacheKey]) {
+                chunk = modelSnapshots[cacheKey];
+            }
+        }
+        var buf = remoteLogBuffers[nodeId] || [];
+        for (var i = 0; i < buf.length; i++) {
+            if (matchFilter(buf[i].modelId)) {
+                chunk += buf[i].text;
+            }
+        }
+        pre.textContent = chunk;
+        if (atBottom && container) {
+            container.scrollTop = container.scrollHeight;
+        }
     }
 
     function nearBottom() {
@@ -94,13 +174,18 @@
     }
 
     function openConsoleModal() {
-        if (typeof populateLogFilter === 'function') populateLogFilter();
-        initConsoleTabs();
+        cleanupStaleRemoteState();
+        if (!consoleInitialized) {
+            activeNodeTab = 'local';
+            if (typeof populateLogFilter === 'function') populateLogFilter('local');
+            initConsoleTabs();
+            consoleInitialized = true;
+        }
         fetchConsole();
         var nodes = window.remoteNodes || [];
         nodes.forEach(function (n) {
             if (n.enabled !== false && n.nodeId) {
-                fetchRemoteConsole(n.nodeId, n.baseUrl);
+                fetchRemoteConsole(n.nodeId);
             }
         });
         setTimeout(function () {
@@ -117,8 +202,6 @@
         if (logBuffer.length > MAX_BUFFER) {
             logBuffer.splice(0, logBuffer.length - MAX_BUFFER);
         }
-        pendingLogs.push(withNl);
-        pendingLogsWithTs.push(entry);
         if (snapshotInFlight) return;
         scheduleFlush();
     }
@@ -134,22 +217,9 @@
 
     function flushPendingLogs() {
         flushScheduled = false;
-        pendingLogs = [];
-        pendingLogsWithTs = [];
         renderFiltered();
-        for (var nid in remotePending) {
-            if (remoteSnapshotInFlight[nid]) continue;
-            var lines = remotePending[nid];
-            if (!lines || !lines.length) continue;
-            remotePending[nid] = [];
-            var pre = document.getElementById('remoteConsoleContent-' + nid);
-            if (!pre) continue;
-            var rChunk = lines.join('');
-            pre.textContent += rChunk;
-            var container = document.getElementById('remoteLogContainer-' + nid);
-            if (container && Math.abs(container.scrollHeight - container.scrollTop - container.clientHeight) < 50) {
-                container.scrollTop = container.scrollHeight;
-            }
+        if (activeNodeTab !== 'local') {
+            renderRemoteFiltered(activeNodeTab);
         }
     }
 
@@ -191,42 +261,61 @@
             tabBar.querySelectorAll('.console-tab-btn').forEach(function (b) { b.classList.remove('active'); });
             btn.classList.add('active');
             var id = btn.dataset.tab;
+            activeNodeTab = id;
             container.querySelectorAll('.console-tab-panel').forEach(function (p) {
                 p.classList.toggle('active', p.dataset.panel === id);
             });
-            if (id !== 'local') {
-                var c = document.getElementById('remoteLogContainer-' + id);
-                if (c) c.scrollTop = c.scrollHeight;
+            if (typeof populateLogFilter === 'function') {
+                populateLogFilter(id === 'local' ? 'local' : id);
+            }
+            currentFilter = '';
+            currentFilterNodeId = 'local';
+            var sel = document.getElementById('logFilterSelect');
+            if (sel) sel.value = '';
+            if (id === 'local') {
+                renderFiltered();
+            } else {
+                renderRemoteFiltered(id);
             }
         });
     }
 
-    async function fetchRemoteConsole(nodeId, baseUrl) {
+    async function fetchRemoteConsole(nodeId) {
+        if (remoteSnapshotInFlight[nodeId]) return;
         remoteSnapshotInFlight[nodeId] = true;
         try {
             var resp = await fetch('/api/sys/console?nodeId=' + encodeURIComponent(nodeId));
             var text = await resp.text();
-            var pre = document.getElementById('remoteConsoleContent-' + nodeId);
-            if (pre) pre.textContent = text || '';
-            var container = document.getElementById('remoteLogContainer-' + nodeId);
-            if (container) container.scrollTop = container.scrollHeight;
+            remoteSnapshots[nodeId] = text;
+            if (activeNodeTab === nodeId) {
+                renderRemoteFiltered(nodeId);
+            }
         } catch (e) {}
         delete remoteSnapshotInFlight[nodeId];
         scheduleFlush();
     }
 
-    function appendRemoteLogLine(nodeId, text) {
-        var pre = document.getElementById('remoteConsoleContent-' + nodeId);
-        if (!pre) return;
+    function appendRemoteLogLine(nodeId, text, modelId) {
+        if (!remoteLogBuffers[nodeId]) remoteLogBuffers[nodeId] = [];
         var clean = (text || '').replace(/\r/g, '');
         var withNl = clean.endsWith('\n') ? clean : clean + '\n';
-        if (!remotePending[nodeId]) remotePending[nodeId] = [];
-        remotePending[nodeId].push(withNl);
+        remoteLogBuffers[nodeId].push({ text: withNl, modelId: modelId || 'system' });
+        if (remoteLogBuffers[nodeId].length > REMOTE_MAX_BUFFER) {
+            remoteLogBuffers[nodeId].splice(0, remoteLogBuffers[nodeId].length - REMOTE_MAX_BUFFER);
+        }
         if (remoteSnapshotInFlight[nodeId]) return;
         scheduleFlush();
     }
 
-    if (refreshConsoleBtn) refreshConsoleBtn.addEventListener('click', fetchConsole);
+    if (refreshConsoleBtn) {
+        refreshConsoleBtn.addEventListener('click', function () {
+            if (activeNodeTab === 'local') {
+                fetchConsole();
+            } else {
+                fetchRemoteConsole(activeNodeTab);
+            }
+        });
+    }
 
     window.openConsoleModal = openConsoleModal;
     window.appendLogLine = appendLogLine;
