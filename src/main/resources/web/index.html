@@ -3441,6 +3441,10 @@ llama.cpp-hub</textarea>
                     title="common.refresh" data-i18n="common.refresh" data-i18n-attr="title">
                     <i class="fas fa-sync-alt"></i>
                 </button>
+                <button class="btn btn-secondary" id="autoRefreshSysInfoBtn" onclick="toggleSysInfoAutoRefresh()"
+                    title="Auto refresh 1s" style="font-size:12px; padding:4px 10px;">
+                    <i class="fas fa-sync-alt"></i> <span>1s</span>
+                </button>
                 <div id="sysinfoStatusText" style="font-size:12px; color:var(--text-secondary); margin-left:auto;">
                 </div>
             </div>
@@ -6028,6 +6032,7 @@ llama.cpp-hub</textarea>
             document.getElementById('main-benchmark-v3').style.display = 'none';
             document.getElementById('main-usage-report').style.display = 'none';
             document.getElementById('main-sysinfo').style.display = 'none';
+            stopSysInfoAutoRefresh();
             //stopConsoleAuto();
             //refreshModels();
             // 更新导航项高亮
@@ -6079,6 +6084,7 @@ llama.cpp-hub</textarea>
             document.getElementById('main-benchmark-v3').style.display = 'none';
             document.getElementById('main-usage-report').style.display = 'none';
             document.getElementById('main-sysinfo').style.display = 'none';
+            stopSysInfoAutoRefresh();
 
             if (window.DownloadManager && typeof window.DownloadManager.start === 'function') {
                 window.DownloadManager.start();
@@ -6100,6 +6106,7 @@ llama.cpp-hub</textarea>
             document.getElementById('main-benchmark-v3').style.display = 'none';
             document.getElementById('main-usage-report').style.display = 'none';
             document.getElementById('main-sysinfo').style.display = 'none';
+            stopSysInfoAutoRefresh();
             openConsoleModal();
             const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
             navItems.forEach(item => item.classList.remove('active'));
@@ -6117,6 +6124,7 @@ llama.cpp-hub</textarea>
             document.getElementById('main-benchmark-v3').style.display = 'none';
             document.getElementById('main-usage-report').style.display = 'none';
             document.getElementById('main-sysinfo').style.display = 'none';
+            stopSysInfoAutoRefresh();
             //stopConsoleAuto();
             const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
             navItems.forEach(item => item.classList.remove('active'));
@@ -6135,6 +6143,7 @@ llama.cpp-hub</textarea>
             document.getElementById('main-benchmark-v3').style.display = 'none';
             document.getElementById('main-usage-report').style.display = 'none';
             document.getElementById('main-sysinfo').style.display = 'none';
+            stopSysInfoAutoRefresh();
             //stopConsoleAuto();
             const main = document.getElementById('main-settings');
             if (main) main.style.display = '';
@@ -6158,6 +6167,7 @@ llama.cpp-hub</textarea>
             document.getElementById('main-console').style.display = 'none';
             document.getElementById('main-usage-report').style.display = 'none';
             document.getElementById('main-sysinfo').style.display = 'none';
+            stopSysInfoAutoRefresh();
             document.getElementById('main-benchmark-v3').style.display = '';
             //stopConsoleAuto();
             const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
@@ -6194,13 +6204,17 @@ llama.cpp-hub</textarea>
             return parts.join(' ') || '0m';
         }
 
+        var sysinfoFetching = {};
+
         function fetchSysInfo(nodeId) {
             var id = nodeId || '';
+            if (sysinfoFetching[id]) return;
+            sysinfoFetching[id] = true;
             var suffix = id ? '-' + id : '';
             var statusEl = document.getElementById('sysinfoStatusText' + suffix);
             var statsEl = document.getElementById('ffStats' + suffix);
             var gridEl = document.getElementById('ffGrid' + suffix);
-            if (statusEl) statusEl.textContent = t('page.sysinfo.status.loading');
+            if (statusEl && !sysinfoAutoRefreshOn) statusEl.textContent = t('page.sysinfo.status.loading');
             var url = '/api/sys/sysinfo';
             if (nodeId) url += '?nodeId=' + encodeURIComponent(nodeId);
             fetch(url)
@@ -6249,10 +6263,12 @@ llama.cpp-hub</textarea>
 
                     if (statusEl) statusEl.textContent = t('page.sysinfo.status.updated', '已更新 \u00b7 ') + timestamp;
                 })
-
                 .catch(e => {
                     if (statusEl) statusEl.textContent = t('page.sysinfo.status.load_failed', '加载失败');
                     if (gridEl) gridEl.innerHTML = '<div class="ff-error">错误: ' + escapeHtml(e.message) + '</div>';
+                })
+                .finally(function () {
+                    sysinfoFetching[id] = false;
                 });
         }
 
@@ -6384,6 +6400,45 @@ llama.cpp-hub</textarea>
             fetchSysInfo(nodeId);
         }
 
+        var sysinfoRefreshTimer = null;
+        var sysinfoAutoRefreshOn = false;
+
+        function startSysInfoAutoRefresh() {
+            if (sysinfoRefreshTimer) return;
+            sysinfoRefreshTimer = setInterval(function () {
+                refreshSysInfoAll();
+            }, 1000);
+        }
+
+        function stopSysInfoAutoRefresh() {
+            if (sysinfoRefreshTimer) {
+                clearInterval(sysinfoRefreshTimer);
+                sysinfoRefreshTimer = null;
+            }
+            sysinfoAutoRefreshOn = false;
+            var btn = document.getElementById('autoRefreshSysInfoBtn');
+            if (btn) {
+                btn.classList.remove('active');
+                var icon = btn.querySelector('i');
+                if (icon) icon.classList.remove('fa-spin');
+            }
+        }
+
+        function toggleSysInfoAutoRefresh() {
+            if (sysinfoAutoRefreshOn) {
+                stopSysInfoAutoRefresh();
+            } else {
+                sysinfoAutoRefreshOn = true;
+                startSysInfoAutoRefresh();
+                var btn = document.getElementById('autoRefreshSysInfoBtn');
+                if (btn) {
+                    btn.classList.add('active');
+                    var icon = btn.querySelector('i');
+                    if (icon) icon.classList.add('fa-spin');
+                }
+            }
+        }
+
         function initSysInfoTabs() {
             var tabBar = document.getElementById('sysinfoTabs');
             var container = document.getElementById('sysinfoTabContainer');
@@ -6446,6 +6501,9 @@ llama.cpp-hub</textarea>
             navItems.forEach(item => item.classList.remove('active'));
             var nav = document.getElementById('nav-sysinfo');
             if (nav) nav.classList.add('active');
+            if (!sysinfoAutoRefreshOn) {
+                toggleSysInfoAutoRefresh();
+            }
         }
 
         function showUsageReport() {
@@ -6458,6 +6516,7 @@ llama.cpp-hub</textarea>
             document.getElementById('main-benchmark-v3').style.display = 'none';
             document.getElementById('main-usage-report').style.display = '';
             document.getElementById('main-sysinfo').style.display = 'none';
+            stopSysInfoAutoRefresh();
             //stopConsoleAuto();
             const navItems = document.querySelectorAll('.sidebar-nav .nav-item');
             navItems.forEach(item => item.classList.remove('active'));

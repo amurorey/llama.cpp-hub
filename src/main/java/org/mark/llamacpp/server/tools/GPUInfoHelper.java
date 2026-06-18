@@ -1,14 +1,17 @@
 package org.mark.llamacpp.server.tools;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -17,17 +20,31 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 	这个东西用来执行gpu-info。
+ * 	这个东西用来执行gpu-info，以交互模式运行持久进程。
  */
 public class GPUInfoHelper {
 
 	private static final Logger logger = LoggerFactory.getLogger(GPUInfoHelper.class);
+	
 	private static final GPUInfoHelper INSTANCE = new GPUInfoHelper();
+	
+	private static final String PROMPT = "gpu-info> ";
+	private static final long READ_TIMEOUT_MS = 30000;
 
 	private volatile boolean initialized = false;
 	private String exePath;
 	private boolean available = false;
 	private String initError;
+
+	private Process process;
+	private BufferedWriter stdinWriter;
+	private BufferedReader stdoutReader;
+	private Thread stdoutThread;
+	private final Object lock = new Object();
+	private volatile boolean processRunning = false;
+	private volatile boolean promptReady = false;
+	private volatile boolean commandDone = false;
+	private StringBuilder outputBuffer = new StringBuilder();
 
 	private GPUInfoHelper() {
 	}
@@ -37,9 +54,10 @@ public class GPUInfoHelper {
 	}
 
 	public synchronized String init() {
-		if (initialized)
-			return initError;
-		initialized = true;
+		// 初始化操作只执行一次，简单的验证
+		if (this.initialized)
+			return this.initError;
+		this.initialized = true;
 
 		try {
 			String os = System.getProperty("os.name").toLowerCase(Locale.ROOT);
@@ -66,8 +84,8 @@ public class GPUInfoHelper {
 				throw new IOException("gpu-info binary not found in resources: " + resourcePath);
 			}
 
-			exePath = new File(resource.toURI()).getAbsolutePath();
-			File exeFile = new File(exePath);
+			this.exePath = new File(resource.toURI()).getAbsolutePath();
+			File exeFile = new File(this.exePath);
 			if (!exeFile.exists()) {
 				throw new IOException("gpu-info binary not found: " + exePath);
 			}
@@ -80,23 +98,134 @@ public class GPUInfoHelper {
 				}
 			}
 
-			available = true;
+			startProcess();
+			this.available = true;
 			return null;
 		} catch (Exception e) {
-			available = false;
-			initError = e.getMessage();
-			return initError;
+			this.available = false;
+			this.initError = e.getMessage();
+			return this.initError;
+		}
+	}
+
+	private void startProcess() throws IOException, InterruptedException {
+		ProcessBuilder pb = new ProcessBuilder(exePath);
+		pb.redirectErrorStream(true);
+		this.process = pb.start();
+
+		this.stdinWriter = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
+		this.stdoutReader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+
+		this.processRunning = true;
+		this.promptReady = false;
+		this.outputBuffer.setLength(0);
+
+		this.stdoutThread = new Thread(this::readStdout, "gpu-info-stdout");
+		this.stdoutThread.setDaemon(true);
+		this.stdoutThread.start();
+
+		long deadline = System.currentTimeMillis() + READ_TIMEOUT_MS;
+		synchronized (this.lock) {
+			while (!this.promptReady) {
+				long waitTime = deadline - System.currentTimeMillis();
+				if (waitTime <= 0) {
+					throw new IOException("gpu-info failed to show prompt within timeout");
+				}
+				this.lock.wait(waitTime);
+			}
+		}
+
+		synchronized (this.lock) {
+			this.outputBuffer.setLength(0);
+		}
+	}
+
+	private void readStdout() {
+		try {
+			char[] buf = new char[8192];
+			int n;
+			while ((n = this.stdoutReader.read(buf)) != -1) {
+				synchronized (lock) {
+					this.outputBuffer.append(buf, 0, n);
+					String content = this.outputBuffer.toString();
+					int idx = content.indexOf(PROMPT);
+					if (idx != -1) {
+						if (!this.promptReady) {
+							this.promptReady = true;
+							this.lock.notifyAll();
+						} else {
+							this.commandDone = true;
+							this.lock.notifyAll();
+						}
+					}
+				}
+			}
+		} catch (IOException e) {
+			// process exited or stream closed
+		} finally {
+			this.processRunning = false;
+			synchronized (this.lock) {
+				this.lock.notifyAll();
+			}
 		}
 	}
 
 	public boolean isAvailable() {
-		if (!initialized)
+		if (!this.initialized)
 			init();
-		return available;
+		return this.available;
 	}
 
 	public String getInitError() {
-		return initError;
+		return this.initError;
+	}
+
+	private String sendCommand(String... flags) throws IOException, InterruptedException {
+		if (!isAvailable() || !this.processRunning) {
+			return null;
+		}
+
+		StringBuilder cmd = new StringBuilder();
+		for (int i = 0; i < flags.length; i++) {
+			if (i > 0) cmd.append(' ');
+			cmd.append(flags[i]);
+		}
+
+		synchronized (this.lock) {
+			this.outputBuffer.setLength(0);
+			this.commandDone = false;
+		}
+
+		this.stdinWriter.write(cmd.toString());
+		this.stdinWriter.write('\n');
+		this.stdinWriter.flush();
+
+		long deadline = System.currentTimeMillis() + READ_TIMEOUT_MS;
+		synchronized (this.lock) {
+			while (!this.commandDone) {
+				long waitTime = deadline - System.currentTimeMillis();
+				if (waitTime <= 0) {
+					throw new IOException("gpu-info command timed out: " + cmd);
+				}
+				this.lock.wait(waitTime);
+			}
+			String content = this.outputBuffer.toString();
+			int promptIdx = content.indexOf(PROMPT);
+			if (promptIdx != -1) {
+				return content.substring(0, promptIdx).trim();
+			}
+			return content.trim();
+		}
+	}
+
+	private synchronized void ensureProcess() {
+		if (!this.processRunning) {
+			try {
+				startProcess();
+			} catch (Exception e) {
+				logger.info("[自动加载] gpu-info 重启失败: {}", e.getMessage());
+			}
+		}
 	}
 
 	public JsonObject getInfo() {
@@ -104,9 +233,11 @@ public class GPUInfoHelper {
 			if (!isAvailable()) {
 				return null;
 			}
+			ensureProcess();
+			String output = sendCommand("--json");
+			if (output == null) return null;
 
-			String output = execJson();
-			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
+			JsonObject root = JsonUtil.fromJson(output, JsonObject.class);
 			if (root == null) {
 				return null;
 			}
@@ -115,6 +246,7 @@ public class GPUInfoHelper {
 
 			return root;
 		} catch (Exception e) {
+			logger.info("[自动加载] gpu-info --json 执行异常: {}", e.getMessage());
 			return null;
 		}
 	}
@@ -159,52 +291,13 @@ public class GPUInfoHelper {
 		}
 	}
 
-	private String execJson() throws IOException {
-		return execJsonWithFlags();
-	}
-
-	private String execJsonWithFlags(String... extraFlags) throws IOException {
-		String[] cmd = new String[2 + extraFlags.length];
-		cmd[0] = exePath;
-		cmd[1] = "--json";
-		System.arraycopy(extraFlags, 0, cmd, 2, extraFlags.length);
-		ProcessBuilder pb = new ProcessBuilder(cmd);
-		pb.redirectErrorStream(true);
-		Process process = pb.start();
-
-		StringBuilder output = new StringBuilder();
-		try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				output.append(line).append('\n');
-			}
-		}
-
-		try {
-			int exitCode = process.waitFor();
-			if (exitCode != 0) {
-				throw new IOException("gpu-info exited with code " + exitCode + ": " + output);
-			}
-		} catch (InterruptedException e) {
-			Thread.currentThread().interrupt();
-			throw new IOException("gpu-info execution interrupted", e);
-		}
-
-		return output.toString();
-	}
-
-	/**
-	 * 执行 gpu-info --json --memory 命令，获取包含内存信息的 JSON 输出。
-	 */
-	private String execJsonWithMemory() throws IOException {
-		return execJsonWithFlags("--memory");
-	}
-
 	public JsonObject getCpuInfo() {
 		try {
 			if (!isAvailable()) return null;
-			String output = execJsonWithFlags("--cpu");
-			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
+			ensureProcess();
+			String output = sendCommand("--cpu", "--json");
+			if (output == null) return null;
+			JsonObject root = JsonUtil.fromJson(output, JsonObject.class);
 			if (root != null && root.has("system")) {
 				return root.getAsJsonObject("system").getAsJsonObject("cpu");
 			}
@@ -217,8 +310,10 @@ public class GPUInfoHelper {
 	public JsonObject getRamInfo() {
 		try {
 			if (!isAvailable()) return null;
-			String output = execJsonWithFlags("--ram");
-			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
+			ensureProcess();
+			String output = sendCommand("--ram", "--json");
+			if (output == null) return null;
+			JsonObject root = JsonUtil.fromJson(output, JsonObject.class);
 			if (root != null && root.has("system")) {
 				return root.getAsJsonObject("system").getAsJsonObject("memory");
 			}
@@ -241,8 +336,10 @@ public class GPUInfoHelper {
 				logger.info("[自动加载] gpu-info 不可用: {}", getInitError());
 				return null;
 			}
-			String output = execJsonWithMemory();
-			JsonObject root = JsonUtil.fromJson(output.trim(), JsonObject.class);
+			ensureProcess();
+			String output = sendCommand("--memory", "--json");
+			if (output == null) return null;
+			JsonObject root = JsonUtil.fromJson(output, JsonObject.class);
 			if (root == null) {
 				logger.info("[自动加载] gpu-info JSON 解析失败");
 				return null;
@@ -292,5 +389,27 @@ public class GPUInfoHelper {
 			logger.info("[自动加载] gpu-info 执行异常: {}", e.getMessage());
 			return null;
 		}
+	}
+
+	public synchronized void close() {
+		if (this.process != null) {
+			try {
+				this.stdinWriter.write("--exit\n");
+				this.stdinWriter.flush();
+			} catch (IOException e) {
+				// ignore
+			}
+			try {
+				if (!this.process.waitFor(5000, TimeUnit.MILLISECONDS)) {
+					this.process.destroyForcibly();
+				}
+			} catch (InterruptedException e) {
+				this.process.destroyForcibly();
+				Thread.currentThread().interrupt();
+			}
+			this.process = null;
+		}
+		this.processRunning = false;
+		this.available = false;
 	}
 }
