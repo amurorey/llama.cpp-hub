@@ -35,6 +35,7 @@ public class EasyChatController implements BaseController {
 
 	private static final String PATH_STREAM_CHAT = "/api/chat/stream-chat";
 	private static final String PATH_MESSAGE_UPDATE = "/api/chat/message/update";
+	private static final String PATH_GENERATE_TITLE = "/api/chat/generate-title";
 
 	@Override
 	public void inactive(ChannelHandlerContext ctx) {
@@ -54,6 +55,10 @@ public class EasyChatController implements BaseController {
 		}
 		if (uri.startsWith(PATH_MESSAGE_UPDATE)) {
 			this.withGlobalLock(ctx, "easy-chat.message.update", () -> this.handleMessageUpdateRequest(ctx, request));
+			return true;
+		}
+		if (uri.startsWith(PATH_GENERATE_TITLE)) {
+			this.handleGenerateTitleRequest(ctx, request);
 			return true;
 		}
 		return false;
@@ -95,6 +100,12 @@ public class EasyChatController implements BaseController {
 
 	private void handleStreamChatRequest(ChannelHandlerContext ctx, FullHttpRequest request) {
 		EasyChatService.getInstance().handleStreamChat(ctx, request);
+	}
+
+	private void handleGenerateTitleRequest(ChannelHandlerContext ctx, FullHttpRequest request)
+			throws RequestMethodException {
+		this.assertRequestMethod(request.method() != HttpMethod.POST, "只支持POST请求");
+		EasyChatService.getInstance().handleGenerateTitle(ctx, request);
 	}
 
 	private void handleStreamChatHistory(ChannelHandlerContext ctx, FullHttpRequest request) {

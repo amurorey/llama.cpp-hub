@@ -217,51 +217,14 @@ public class EasyChatService {
 			if (nodeId != null) {
 				nodeId = nodeId.trim();
 			}
-			boolean isRemoteNode = nodeId != null && !nodeId.isEmpty();
-			logger.info("[EasyChat][Node路由] X-Node-Id={}, isRemoteNode={}, modelId={}", nodeId, isRemoteNode, modelId);
-
-			// Resolve model port (local only; remote nodes skip this)
-			Integer modelPort = null;
-			if (!isRemoteNode) {
-				LlamaServerManager manager = LlamaServerManager.getInstance();
-				if (!manager.getLoadedProcesses().containsKey(modelId)) {
-					String resolved = manager.findModelIdByAlias(modelId);
-					if (resolved != null) {
-						modelId = resolved;
-					}
-				}
-				if (!manager.getLoadedProcesses().containsKey(modelId)) {
-					// 尝试自动加载
-					if (AutoLoadPolicyManager.getInstance().canAutoLoad(modelId)) {
-						logger.info("[EasyChat][自动加载] 尝试加载模型: model={}", modelId);
-						long timeout = AutoLoadPolicyManager.getInstance().getAutoLoadTimeoutMs();
-						String loadError = manager.autoLoadModelFromConfig(modelId, timeout);
-						if (loadError == null) {
-							modelPort = manager.getModelPort(modelId);
-							if (modelPort != null) {
-								logger.info("[EasyChat][自动加载] 加载成功: model={}, port={}", modelId, modelPort);
-							} else {
-								LlamaServer.sendJsonResponse(ctx, ApiResponse.error("自动加载后未找到模型端口: " + modelId));
-								return;
-							}
-						} else {
-							logger.warn("[EasyChat][自动加载] 加载失败: model={}, error={}", modelId, loadError);
-							LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型加载失败: " + loadError));
-							return;
-						}
-					} else {
-						LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型未找到: " + modelId));
-						return;
-					}
-				}
-				if (modelPort == null) {
-					modelPort = manager.getModelPort(modelId);
-					if (modelPort == null) {
-						LlamaServer.sendJsonResponse(ctx, ApiResponse.error("模型端口未找到: " + modelId));
-						return;
-					}
-				}
+			ModelTarget modelTarget = resolveModelTarget(modelId, nodeId);
+			if (modelTarget.error != null) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(modelTarget.error));
+				return;
 			}
+			modelId = modelTarget.resolvedModelId;
+			int modelPort = modelTarget.port != null ? modelTarget.port.intValue() : 0;
+			boolean isRemoteNode = modelTarget.isRemoteNode;
 
 			// Resolve system prompt from synced assistant config.
 			String systemPrompt = resolveAssistantSystemPrompt(assistantName);
@@ -368,7 +331,7 @@ public class EasyChatService {
 			}
 			// Create effectively final copies for lambda capture
 			final String finalModelId = modelId;
-			final int finalModelPort = modelPort == null ? 0 : modelPort;
+			final int finalModelPort = modelPort;
 			final String finalNodeId = nodeId;
 			final boolean finalIsRemoteNode = isRemoteNode;
 			final String finalSystemPrompt = systemPrompt;
@@ -729,6 +692,260 @@ public class EasyChatService {
 		}
 		sendGlobalLockBusy(ctx, operationName);
 		return null;
+	}
+
+	/**
+	 * 解析模型目标：别名解析、自动加载、远程节点路由。
+	 * 返回的 ModelTarget 包含解析后的 modelId、port（本地）、nodeId（远程）以及 error（失败时非空）。
+	 */
+	private ModelTarget resolveModelTarget(String modelId, String nodeId) {
+		boolean isRemoteNode = nodeId != null && !nodeId.isEmpty();
+		logger.info("[EasyChat][Node路由] X-Node-Id={}, isRemoteNode={}, modelId={}", nodeId, isRemoteNode, modelId);
+		if (isRemoteNode) {
+			return new ModelTarget(modelId, null, nodeId, true, null);
+		}
+		LlamaServerManager manager = LlamaServerManager.getInstance();
+		String resolvedModelId = modelId;
+		if (!manager.getLoadedProcesses().containsKey(resolvedModelId)) {
+			String resolved = manager.findModelIdByAlias(resolvedModelId);
+			if (resolved != null) {
+				resolvedModelId = resolved;
+			}
+		}
+		Integer modelPort = null;
+		if (!manager.getLoadedProcesses().containsKey(resolvedModelId)) {
+			if (AutoLoadPolicyManager.getInstance().canAutoLoad(resolvedModelId)) {
+				logger.info("[EasyChat][自动加载] 尝试加载模型: model={}", resolvedModelId);
+				long timeout = AutoLoadPolicyManager.getInstance().getAutoLoadTimeoutMs();
+				String loadError = manager.autoLoadModelFromConfig(resolvedModelId, timeout);
+				if (loadError == null) {
+					modelPort = manager.getModelPort(resolvedModelId);
+					if (modelPort == null) {
+						return ModelTarget.error("自动加载后未找到模型端口: " + resolvedModelId);
+					}
+					logger.info("[EasyChat][自动加载] 加载成功: model={}, port={}", resolvedModelId, modelPort);
+				} else {
+					logger.warn("[EasyChat][自动加载] 加载失败: model={}, error={}", resolvedModelId, loadError);
+					return ModelTarget.error("模型加载失败: " + loadError);
+				}
+			} else {
+				return ModelTarget.error("模型未找到: " + resolvedModelId);
+			}
+		}
+		if (modelPort == null) {
+			modelPort = manager.getModelPort(resolvedModelId);
+			if (modelPort == null) {
+				return ModelTarget.error("模型端口未找到: " + resolvedModelId);
+			}
+		}
+		return new ModelTarget(resolvedModelId, modelPort, null, false, null);
+	}
+
+	static final class ModelTarget {
+		final String resolvedModelId;
+		final Integer port;
+		final String nodeId;
+		final boolean isRemoteNode;
+		final String error;
+
+		ModelTarget(String resolvedModelId, Integer port, String nodeId, boolean isRemoteNode, String error) {
+			this.resolvedModelId = resolvedModelId;
+			this.port = port;
+			this.nodeId = nodeId;
+			this.isRemoteNode = isRemoteNode;
+			this.error = error;
+		}
+
+		static ModelTarget error(String msg) {
+			return new ModelTarget(null, null, null, false, msg);
+		}
+	}
+
+	/* ---- Generate title ---- */
+
+	private static final int TITLE_GEN_TIMEOUT_MS = 60_000;
+	private static final int TITLE_GEN_MAX_TOKENS = 30;
+
+	/**
+	 * Handle generate-title request.
+	 * <p>
+	 * Only accepts the user's first message text, builds a fixed-sampling non-stream
+	 * request (temperature=0.3, max_tokens=30, thinking disabled, no multimodal),
+	 * forwards to the target llama.cpp process, and returns the generated title.
+	 * Does NOT use the global lock (no fragment/state access) — frontend guarantees serial.
+	 */
+	public void handleGenerateTitle(ChannelHandlerContext ctx, FullHttpRequest request) {
+		JsonObject body;
+		try {
+			body = JsonUtil.parseFullHttpRequestToJsonObject(request, ctx);
+		} catch (Exception e) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("解析请求体失败: " + e.getMessage()));
+			return;
+		}
+		if (body == null) {
+			return; // parseFullHttpRequestToJsonObject 已发送错误响应
+		}
+		String conversationId = JsonUtil.getJsonString(body, "conversationId", "");
+		if (conversationId == null || conversationId.isBlank()) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少conversationId"));
+			return;
+		}
+		String modelId = JsonUtil.getJsonString(body, "model", "");
+		if (modelId == null || modelId.isBlank()) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少model"));
+			return;
+		}
+		String nodeId = JsonUtil.getJsonString(body, "nodeId", "");
+		if (nodeId != null) {
+			nodeId = nodeId.trim();
+		}
+		String prompt = JsonUtil.getJsonString(body, "prompt", "");
+		if (prompt == null || prompt.isBlank()) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("缺少prompt"));
+			return;
+		}
+
+		// Resolve model target (alias resolution + auto-load + remote node routing)
+		ModelTarget modelTarget = resolveModelTarget(modelId, nodeId);
+		if (modelTarget.error != null) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error(modelTarget.error));
+			return;
+		}
+
+		final String finalModelId = modelTarget.resolvedModelId;
+		final int finalModelPort = modelTarget.port != null ? modelTarget.port.intValue() : 0;
+		final String finalNodeId = modelTarget.nodeId;
+		final boolean finalIsRemoteNode = modelTarget.isRemoteNode;
+		final String finalPrompt = prompt;
+		final String finalConversationId = conversationId;
+
+		worker.execute(() -> {
+			try {
+				if (!ctx.channel().isActive()) {
+					logger.info("[EasyChat][TitleGen] channel已关闭，取消生成标题请求");
+					return;
+				}
+				String title = finalIsRemoteNode
+					? requestTitleFromRemoteNode(finalNodeId, finalModelId, finalPrompt)
+					: requestTitleFromLocal(finalModelId, finalModelPort, finalPrompt);
+				if (!ctx.channel().isActive()) {
+					logger.info("[EasyChat][TitleGen] channel在响应前已关闭，丢弃标题");
+					return;
+				}
+				if (title == null) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("标题生成失败：未返回有效内容"));
+					return;
+				}
+				Map<String, Object> data = new HashMap<>();
+				data.put("title", title);
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
+			} catch (Exception e) {
+				logger.info("[EasyChat][TitleGen] 生成标题失败 conversation={}", finalConversationId, e);
+				if (ctx.channel().isActive()) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("生成标题失败: " + e.getMessage()));
+				}
+			}
+		});
+	}
+
+	private JsonObject buildTitleRequestJson(String modelId, String userPrompt) {
+		String titlePrompt = "你是一个对话标题生成助手。\n"
+			+ "请根据下面的用户首条消息，生成一个简短准确的会话标题。\n"
+			+ "要求：\n"
+			+ "1. 只输出标题本身，不要加引号、标签或额外说明\n"
+			+ "2. 标题语言与用户输入的语言保持一致\n"
+			+ "3. 标题尽量简短，中文控制在 18 个汉字以内，其他语言控制在 8 个词以内\n"
+			+ "\n"
+			+ "[用户首条消息]\n"
+			+ userPrompt;
+		JsonObject userMessage = new JsonObject();
+		userMessage.addProperty("role", "user");
+		userMessage.addProperty("content", titlePrompt);
+		JsonArray messages = new JsonArray();
+		messages.add(userMessage);
+
+		JsonObject requestBody = new JsonObject();
+		requestBody.addProperty("model", modelId);
+		requestBody.addProperty("stream", false);
+		requestBody.add("messages", messages);
+		requestBody.addProperty("temperature", 0.3);
+		requestBody.addProperty("max_tokens", TITLE_GEN_MAX_TOKENS);
+		JsonObject chatTemplateKwargs = new JsonObject();
+		chatTemplateKwargs.addProperty("enable_thinking", false);
+		requestBody.add("chat_template_kwargs", chatTemplateKwargs);
+		return requestBody;
+	}
+
+	private String requestTitleFromLocal(String modelId, int port, String userPrompt) throws IOException {
+		String targetUrl = String.format("http://localhost:%d/v1/chat/completions", port);
+		HttpURLConnection connection = (HttpURLConnection) URI.create(targetUrl).toURL().openConnection();
+		try {
+			connection.setRequestMethod("POST");
+			connection.setRequestProperty("Content-Type", "application/json");
+			connection.setConnectTimeout(TITLE_GEN_TIMEOUT_MS);
+			connection.setReadTimeout(TITLE_GEN_TIMEOUT_MS);
+			connection.setDoOutput(true);
+			byte[] requestBody = JsonUtil.toJson(buildTitleRequestJson(modelId, userPrompt)).getBytes(StandardCharsets.UTF_8);
+			try (OutputStream os = connection.getOutputStream()) {
+				os.write(requestBody);
+				os.flush();
+			}
+			int responseCode = connection.getResponseCode();
+			if (!(responseCode >= 200 && responseCode < 300)) {
+				String errBody = readErrorBody(connection);
+				logger.warn("[EasyChat][TitleGen] llama.cpp错误响应 code={} body={}", responseCode, errBody);
+				throw new IOException("模型返回错误: " + responseCode);
+			}
+			byte[] responseBytes = connection.getInputStream().readAllBytes();
+			String responseBody = new String(responseBytes, StandardCharsets.UTF_8);
+			return parseTitleFromResponse(responseBody);
+		} finally {
+			connection.disconnect();
+		}
+	}
+
+	private String requestTitleFromRemoteNode(String nodeId, String modelId, String userPrompt) {
+		JsonObject requestBody = buildTitleRequestJson(modelId, userPrompt);
+		NodeManager.HttpResult result = NodeManager.getInstance().callRemoteApi(
+			nodeId, "POST", "v1/chat/completions", requestBody, TITLE_GEN_TIMEOUT_MS, TITLE_GEN_TIMEOUT_MS);
+		if (!result.isSuccess()) {
+			logger.warn("[EasyChat][TitleGen][Remote] 远程节点错误 code={} body={}", result.getStatusCode(), result.getBody());
+			throw new RuntimeException("远程节点返回错误: " + result.getStatusCode());
+		}
+		return parseTitleFromResponse(result.getBody());
+	}
+
+	private String parseTitleFromResponse(String responseBody) {
+		JsonObject json = JsonUtil.tryParseObject(responseBody);
+		if (json == null || !json.has("choices") || !json.get("choices").isJsonArray()) {
+			return null;
+		}
+		JsonArray choices = json.getAsJsonArray("choices");
+		if (choices.size() == 0 || !choices.get(0).isJsonObject()) {
+			return null;
+		}
+		JsonObject choice = choices.get(0).getAsJsonObject();
+		String content = "";
+		if (choice.has("message") && choice.get("message").isJsonObject()) {
+			JsonObject message = choice.getAsJsonObject("message");
+			if (message.has("content") && !message.get("content").isJsonNull()) {
+				try {
+					content = message.get("content").getAsString();
+				} catch (Exception ignore) {
+					content = "";
+				}
+			}
+		}
+		if (content == null || content.trim().isEmpty()) {
+			return null;
+		}
+		for (String line : content.trim().split("\\r?\\n")) {
+			String t = line.trim();
+			if (!t.isEmpty()) {
+				return t;
+			}
+		}
+		return content.trim();
 	}
 
 	private void sendGlobalLockBusy(ChannelHandlerContext ctx, String requestedOperation) {

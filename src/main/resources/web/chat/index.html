@@ -526,6 +526,7 @@
     const EASY_CHAT_SYNC_ENDPOINT = '/api/chat/sync';
     const EASY_CHAT_DELETE_ENDPOINT = '/api/chat/delete';
     const EASY_CHAT_MESSAGE_UPDATE_ENDPOINT = '/api/chat/message/update';
+    const EASY_CHAT_GENERATE_TITLE_ENDPOINT = '/api/chat/generate-title';
     const STATE_REVISION_CONFLICT_CODE = 'STATE_REVISION_CONFLICT';
     const STATE_REVISION_TIMEOUT_MS = 2000;
     const STATE_LOAD_TIMEOUT_MS = 30000;
@@ -573,6 +574,7 @@
       assistants: [],
       abortController: null,
       isSending: false,
+      isGeneratingTitle: false,
       isRecording: false,
       editingMessageIndex: null,
       editingMessageDraft: null,
@@ -1761,8 +1763,15 @@
         return;
       }
       els.sendBtn.classList.remove('is-stop');
-      els.sendBtn.setAttribute('aria-label', window.I18N.t('page.chat.main.action.send', '发送'));
-      els.sendBtn.setAttribute('title', window.I18N.t('page.chat.main.action.send', '发送'));
+      if (state.isGeneratingTitle) {
+        els.sendBtn.disabled = true;
+        els.sendBtn.setAttribute('aria-label', window.I18N.t('page.chat.main.status.generating_title', '正在生成标题…'));
+        els.sendBtn.setAttribute('title', window.I18N.t('page.chat.main.status.generating_title', '正在生成标题…'));
+      } else {
+        els.sendBtn.disabled = false;
+        els.sendBtn.setAttribute('aria-label', window.I18N.t('page.chat.main.action.send', '发送'));
+        els.sendBtn.setAttribute('title', window.I18N.t('page.chat.main.action.send', '发送'));
+      }
       els.sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>';
     }
 
@@ -2466,8 +2475,12 @@
       if (!conversation) {
         return;
       }
+      if (conversation.titleGenerated && conversation.title) {
+        return;
+      }
       const userMsgs = conversation.messages.filter(item => item.role === 'user' && hasMessageBody(item));
-      if (userMsgs.length >= 2 && conversation.title) {
+      const defaultTitle = window.I18N.t('page.chat.main.status.new_conversation_short', '新对话');
+      if (userMsgs.length >= 1 && conversation.title && conversation.title !== defaultTitle) {
         return;
       }
       const firstUser = conversation.messages.find(item => item.role === 'user' && hasMessageBody(item));
@@ -5291,20 +5304,9 @@
         removeTypingIndicator();
         const doneConversation = getCurrentConversation();
         updateConversationTitle(doneConversation);
-        let shouldGenerateTitle = false;
-        if (doneConversation && Array.isArray(doneConversation.messages)) {
-          const firstUserIdx = doneConversation.messages.findIndex(m => m.role === 'user' && hasMessageBody(m));
-          const nextUserIdx = doneConversation.messages.findIndex((m, i) => i > firstUserIdx && m.role === 'user' && hasMessageBody(m));
-          if (firstUserIdx >= 0 && nextUserIdx < 0) {
-            shouldGenerateTitle = true;
-          }
-        }
         renderConversationList();
         syncConversationMeta();
         updateMessageActionStates();
-        if (shouldGenerateTitle && doneConversation && state.currentConversationId === doneConversation.id) {
-          void generateConversationTitle(doneConversation);
-        }
       }
       return !requestFailed;
     }
@@ -6195,27 +6197,42 @@
       });
     }
 
-    async function waitForServerReadyForEphemeral(operationName, options = {}) {
-      const maxAttempts = Math.max(1, Number(options.maxAttempts) || 8);
-      const retryDelay = Math.max(0, Number(options.retryDelay) || 300);
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const precheck = await ensureServerStateReady({
-          operationName,
-          showNetworkToast: false,
-          showConflictToast: false,
-          skipWhileSending: false
-        });
-        if (precheck.ok) {
-          return true;
-        }
-        if (precheck.reason !== 'busy') {
-          return false;
-        }
-        if (attempt + 1 < maxAttempts) {
-          await waitMs(retryDelay);
-        }
+    async function generateTitleViaApi(prompt, signal) {
+      const conversationId = typeof state.currentConversationId === 'string' ? state.currentConversationId.trim() : '';
+      if (!conversationId) {
+        return '';
       }
-      return false;
+      const compositeKey = state.titleGenModel || state.model || '';
+      if (!compositeKey) {
+        return '';
+      }
+      const sep = compositeKey.lastIndexOf('::');
+      const bareModelId = sep >= 0 ? compositeKey.substring(0, sep) : compositeKey;
+      const nodeId = sep >= 0 ? compositeKey.substring(sep + 2) : '';
+      const body = {
+        conversationId,
+        model: bareModelId,
+        prompt
+      };
+      if (nodeId) {
+        body.nodeId = nodeId;
+      }
+      const response = await fetch(EASY_CHAT_GENERATE_TITLE_ENDPOINT, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(body),
+        signal
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || window.I18N.t('page.chat.main.error.request_failed_status', '请求失败：{status}').replace('{status}', response.status));
+      }
+      const json = await response.json();
+      if (json?.success === false) {
+        throw new Error(json?.error || window.I18N.t('page.chat.main.error.title_gen_failed', '标题生成失败'));
+      }
+      const title = typeof json?.data?.title === 'string' ? json.data.title.trim() : '';
+      return title;
     }
 
     async function requestEphemeralStreamChat(options = {}) {
@@ -6596,7 +6613,7 @@
       if (!precheck.ok) {
         return;
       }
-      if (state.isSending) {
+      if (state.isSending || state.isGeneratingTitle) {
         return;
       }
       syncRuntimeStateFromCurrentAssistant();
@@ -6612,6 +6629,44 @@
       if (!state.model) {
         updateStatus('error', window.I18N.t('page.chat.main.status.no_model_selected', '请先选择模型'), window.I18N.t('page.chat.main.status.no_model_selected_short', '未选择模型'));
         return;
+      }
+
+      const hasFirstUserMessage = !!(getCurrentConversation()?.messages?.some(m => m.role === 'user' && hasMessageBody(m)));
+      const shouldGenerateTitle = state.enableTitleGen && !hasFirstUserMessage;
+      if (shouldGenerateTitle) {
+        const titleConvId = state.currentConversationId;
+        state.isGeneratingTitle = true;
+        state.abortController = new AbortController();
+        syncSendButtonState();
+        updateStatus('ready', window.I18N.t('page.chat.main.status.generating_title', '正在生成标题…'), window.I18N.t('page.chat.main.status.generating_title_short', '生成标题'));
+        let titleAborted = false;
+        try {
+          const title = await generateTitleViaApi(prompt, state.abortController.signal);
+          if (title) {
+            const titleConv = state.conversations.find(c => c.id === titleConvId);
+            if (titleConv) {
+              titleConv.title = title;
+              titleConv.titleGenerated = true;
+              if (state.currentConversationId === titleConvId) {
+                renderConversationList();
+                syncConversationMeta();
+              }
+            }
+          }
+        } catch (error) {
+          if (error?.name === 'AbortError') {
+            titleAborted = true;
+          } else {
+            console.warn('[EasyChat][TitleGen] 标题生成失败，降级继续', error);
+          }
+        } finally {
+          state.isGeneratingTitle = false;
+          state.abortController = null;
+          syncSendButtonState();
+        }
+        if (titleAborted) {
+          return;
+        }
       }
 
       if (state.enableTimestamp && prompt) {
@@ -6669,81 +6724,6 @@
       els.promptInput.focus();
       setSidebarOpen(false);
       updateStatus('ready', window.I18N.t('page.chat.main.status.new_conversation', '已创建新对话'), window.I18N.t('page.chat.main.status.new_conversation_short', '新对话'));
-    }
-
-    async function generateConversationTitle(conversation) {
-      if (!state.enableTitleGen) {
-        return;
-      }
-      if (!conversation || !Array.isArray(conversation.messages)) {
-        return;
-      }
-      const firstUser = conversation.messages.find(m => m.role === 'user' && hasMessageBody(m));
-      if (!firstUser) {
-        return;
-      }
-      const firstAssistant = conversation.messages.find(m => m.role === 'assistant' && hasMessageBody(m));
-      if (!firstAssistant) {
-        return;
-      }
-      const userContent = buildUserContent(firstUser);
-      const assistantContent = contentToText(firstAssistant.content);
-      if (!userContent && !assistantContent) {
-        return;
-      }
-      const convAssistant = getConversationAssistant(conversation);
-      const compositeKey = state.titleGenModel || state.model || '';
-      if (!compositeKey) {
-        return;
-      }
-      const prompt = [
-        '你是一个对话标题生成助手。',
-        '请根据下面的对话内容，生成一个简短准确的会话标题。',
-        '要求：',
-        '1. 只输出标题本身',
-        '2. 不要加引号、标签或额外说明',
-        '3. 尽量控制在 18 个汉字以内',
-        '',
-        '[用户首条消息]',
-        contentToText(userContent),
-        '',
-        '[助手首条回复]',
-        assistantContent
-      ].join('\n');
-      try {
-        const ready = await waitForServerReadyForEphemeral(window.I18N.t('page.chat.main.settings.templates.title_gen_label', '标题生成'), {
-          maxAttempts: 10,
-          retryDelay: 300
-        });
-        if (!ready) {
-          return;
-        }
-        const result = await requestEphemeralStreamChat({
-          conversationId: conversation.id,
-          assistant: convAssistant,
-          compositeModel: compositeKey,
-          mode: 'title',
-          stream: false,
-          prompt,
-          samplingOverrides: {
-            max_tokens: 30,
-            temperature: 0.3,
-            chat_template_kwargs: {
-              enable_thinking: false
-            }
-          }
-        });
-        const raw = contentToText(result?.content || '').trim();
-        const title = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean)[0] || '';
-        if (title) {
-          conversation.title = title;
-          renderConversationList();
-          syncConversationMeta();
-          await persistState({ immediate: true });
-        }
-      } catch (error) {
-        console.warn('[EasyChat][TitleGen] 标题生成失败', error);
-      }
     }
 
     async function generateAutoReply() {
@@ -6877,6 +6857,7 @@
       setConversationLoadedMessages(conversation, []);
       conversation.updatedAt = Date.now();
       conversation.title = window.I18N.t('page.chat.main.status.new_conversation_short', '新对话');
+      conversation.titleGenerated = false;
       state.editingMessageIndex = null;
       state.editingMessageDraft = null;
       state.draftImages = [];
