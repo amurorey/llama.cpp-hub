@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.ZipFile;
 
+import org.mark.llamacpp.server.tools.GPUInfoHelper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -190,12 +191,15 @@ public class LetsUpdate {
 			Path zipFile = zip.toPath().normalize();
 			try {
 				extractZip(zipFile, pendingDir);
+				GPUInfoHelper.getInstance().close();
 				backupOldFiles(userDir);
 				moveNewFiles(userDir, pendingDir);
+				GPUInfoHelper.getInstance().reopen();
 			} catch (Exception e) {
 				logger.error("应用更新时发生错误，尝试回滚", e);
 				status.set(UpdateStatus.ROLLBACK);
 				rollback(userDir);
+				GPUInfoHelper.getInstance().reopen();
 				status.set(UpdateStatus.IDLE);
 				cleanup(pendingDir);
 				result.put("success", false);
@@ -203,6 +207,8 @@ public class LetsUpdate {
 				return result;
 			}
 			cleanup(pendingDir);
+			Path oldClassesBackup = userDir.resolve(CACHE_DIR).resolve("old-classes").normalize();
+			deleteQuietly(oldClassesBackup);
 			Path zipToDelete = userDir.resolve(UPDATE_ZIP).normalize();
 			deleteQuietly(zipToDelete);
 			Path versionFile = userDir.resolve(UPDATE_PENDING_VERSION).normalize();

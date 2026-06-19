@@ -32,6 +32,7 @@ public class GPUInfoHelper {
 	private static final long READ_TIMEOUT_MS = 30000;
 
 	private volatile boolean initialized = false;
+	private volatile boolean closed = false;
 	private String exePath;
 	private boolean available = false;
 	private String initError;
@@ -55,6 +56,10 @@ public class GPUInfoHelper {
 
 	public synchronized String init() {
 		// 初始化操作只执行一次，简单的验证
+		if (this.closed) {
+			this.initError = "helper closed for update";
+			return this.initError;
+		}
 		if (this.initialized)
 			return this.initError;
 		this.initialized = true;
@@ -171,6 +176,8 @@ public class GPUInfoHelper {
 	}
 
 	public boolean isAvailable() {
+		if (this.closed)
+			return false;
 		if (!this.initialized)
 			init();
 		return this.available;
@@ -411,5 +418,15 @@ public class GPUInfoHelper {
 		}
 		this.processRunning = false;
 		this.available = false;
+		this.initialized = false;
+		this.closed = true;
+	}
+
+	/**
+	 * 更新流程结束后重新打开 helper：清除 closed 守卫并以新版本 exe 重新初始化。
+	 */
+	public synchronized void reopen() {
+		this.closed = false;
+		this.init();
 	}
 }
