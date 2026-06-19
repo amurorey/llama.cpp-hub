@@ -106,23 +106,13 @@
         const cacheKey = getCacheKey();
         if (!currentFilter || currentFilter === 'system') {
             chunk = snapshotText || '';
-        } else {
-            if (modelSnapshots[cacheKey]) {
-                // 已获取过历史日志，只使用 logBuffer（WebSocket 实时推送）
-                for (let i = 0; i < logBuffer.length; i++) {
-                    if (matchFilter(logBuffer[i].modelId)) {
-                        chunk += logBuffer[i].text;
-                        matched++;
-                    }
-                }
-            } else {
-                // 第一次选择，还没有缓存，从 API 获取
-                for (let i = 0; i < logBuffer.length; i++) {
-                    if (matchFilter(logBuffer[i].modelId)) {
-                        chunk += logBuffer[i].text;
-                        matched++;
-                    }
-                }
+        } else if (cacheKey && modelSnapshots[cacheKey]) {
+            chunk = modelSnapshots[cacheKey];
+        }
+        for (let i = 0; i < logBuffer.length; i++) {
+            if (matchFilter(logBuffer[i].modelId)) {
+                chunk += logBuffer[i].text;
+                matched++;
             }
         }
         logEl.textContent = chunk;
