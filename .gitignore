@@ -14,3 +14,4 @@
 /llamacpp/
 /ssl/
 /src/main/resources/tools/gguf-mem
+/src/main/resources/web/llama.cpp
