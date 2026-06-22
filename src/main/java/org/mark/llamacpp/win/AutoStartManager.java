@@ -158,7 +158,7 @@ public class AutoStartManager {
             }
             logger.info("使用 JRE [{}] + classpath 作为启动目标", javaHome);
             return new StartupTarget(javawPath.toString(),
-                "-Xms512m -Xmx512m -XX:MaxDirectMemorySize=256m -classpath \"" + classpath +
+                "-Xms128m -Xmx128m -XX:MaxDirectMemorySize=256m -classpath \"" + classpath +
                 "\" org.mark.llamacpp.server.LlamaServer",
                 userDir);
         }
