@@ -149,6 +149,19 @@ function isLoadModelParamEnabled(modal, fieldName) {
     return !!el.checked;
 }
 
+function setLoadModelParamEnabled(modal, fieldName, enabled) {
+    const key = fieldName === null || fieldName === undefined ? '' : String(fieldName).trim();
+    if (!key) return;
+    const enableEl = findById(modal, 'param_enable_' + key);
+    if (enableEl && 'checked' in enableEl) {
+        enableEl.checked = !!enabled;
+    }
+    const valueEl = findById(modal, 'param_' + key);
+    if (valueEl && 'value' in valueEl) {
+        valueEl.value = enabled ? '1' : '0';
+    }
+}
+
 function isTruthyLogicValue(value) {
     if (value === null || value === undefined) return false;
     const v = String(value).trim().toLowerCase();
@@ -930,6 +943,12 @@ function applyModelCapabilitiesToUi(modal, caps) {
     if (els.vision) els.vision.checked = !!c.vision;
     if (els.audio) els.audio.checked = !!c.audio;
     enforceModelCapabilitiesRules(modal, '');
+
+    // 自动关联启动参数：仅在首次加载 capabilities 时触发，避免覆盖用户手动操作
+    if (window.__capabilitiesApplying) {
+        setLoadModelParamEnabled(modal, 'embedding', !!c.embedding);
+        setLoadModelParamEnabled(modal, 'rerank', !!c.rerank);
+    }
 }
 
 function saveModelCapabilitiesNow(modelId, caps, modal) {
