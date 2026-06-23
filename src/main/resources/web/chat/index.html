@@ -615,6 +615,8 @@
     let modelNodeIdMap = {};
     let modelOptions = [];
     let modelSearchTerm = '';
+    let modelLoadingKeys = new Set();
+    let modelLoadPollTimers = {};
     let hwNodes = [{ nodeId: '', name: '本机', status: 'ONLINE' }];
     let hwSelectedNodeId = '';
     let hwRefreshTimer = 0;
@@ -3406,6 +3408,27 @@
       check.setAttribute('aria-hidden', 'true');
       right.appendChild(check);
 
+      if (!opt.isEmpty && !isTemp) {
+        const action = document.createElement('span');
+        action.setAttribute('role', 'button');
+        action.className = 'model-menu-action';
+        if (opt.isLoading) {
+          action.classList.add('loading');
+          action.setAttribute('aria-disabled', 'true');
+          action.textContent = window.I18N.t('page.chat.main.composer.model_action_loading', '加载中…');
+          action.setAttribute('data-action', 'loading');
+        } else if (opt.statusLoaded) {
+          action.textContent = window.I18N.t('page.chat.main.composer.model_action_unload', '停止');
+          action.setAttribute('data-action', 'unload');
+          action.title = window.I18N.t('page.chat.main.composer.model_action_unload', '停止');
+        } else {
+          action.textContent = window.I18N.t('page.chat.main.composer.model_action_load', '加载');
+          action.setAttribute('data-action', 'load');
+          action.title = window.I18N.t('page.chat.main.composer.model_action_load', '加载');
+        }
+        right.appendChild(action);
+      }
+
       item.appendChild(left);
       item.appendChild(right);
       return item;
@@ -3526,6 +3549,145 @@
       closeModelMenu();
       if (state.model !== previous) {
         persistState();
+      }
+    }
+
+    function splitModelValue(value) {
+      const sep = value.lastIndexOf('::');
+      return sep >= 0
+        ? { id: value.substring(0, sep), nodeId: value.substring(sep + 2) }
+        : { id: value, nodeId: '' };
+    }
+
+    function applyModelLoadingFlag(value, flag) {
+      if (flag) {
+        modelLoadingKeys.add(value);
+      } else {
+        modelLoadingKeys.delete(value);
+      }
+      const opt = modelOptions.find(o => o.value === value);
+      if (opt) {
+        opt.isLoading = flag;
+      }
+    }
+
+    function stopModelLoadPoll(value) {
+      const timer = modelLoadPollTimers[value];
+      if (timer) {
+        clearTimeout(timer);
+        delete modelLoadPollTimers[value];
+      }
+    }
+
+    function scheduleModelLoadPoll(value, deadline) {
+      stopModelLoadPoll(value);
+      const tick = async () => {
+        delete modelLoadPollTimers[value];
+        if (Date.now() >= deadline) {
+          applyModelLoadingFlag(value, false);
+          renderModelMenu();
+          showToast('error', window.I18N.t('page.chat.main.composer.model_action_load_timeout', '加载超时，请稍后在首页查看状态'));
+          return;
+        }
+        await refreshModels();
+        const opt = findModelOption(value);
+        if (opt && opt.statusLoaded) {
+          applyModelLoadingFlag(value, false);
+          renderModelMenu();
+          showToast('success', window.I18N.t('page.chat.main.composer.model_action_load_success', '模型加载成功'));
+          selectModel(value);
+          return;
+        }
+        if (!modelLoadingKeys.has(value)) {
+          return;
+        }
+        modelLoadPollTimers[value] = setTimeout(tick, 1500);
+      };
+      modelLoadPollTimers[value] = setTimeout(tick, 1500);
+    }
+
+    async function loadModelFromMenu(opt) {
+      if (!opt || opt.isEmpty || opt.isLoading || opt.statusLoaded) return;
+      const { id, nodeId } = splitModelValue(opt.value);
+      if (!id) return;
+      const configNodeId = nodeId && nodeId !== 'local' ? nodeId : '';
+      const configUrl = configNodeId
+        ? '/api/models/config/get?modelId=' + encodeURIComponent(id) + '&nodeId=' + encodeURIComponent(configNodeId)
+        : '/api/models/config/get?modelId=' + encodeURIComponent(id);
+      try {
+        const configRes = await fetch(configUrl).then(r => r.json());
+        if (!configRes || !configRes.success) {
+          showToast('error', window.I18N.t('page.chat.main.composer.model_action_load_no_config', '未找到启动配置，请先在首页配置启动参数'));
+          return;
+        }
+        const data = configRes.data || {};
+        const configs = data.configs || {};
+        const selected = data.selectedConfig || 'default';
+        const config = configs[selected] || {};
+        const llamaBinPath = config.llamaBinPath || '';
+        const cmd = config.cmd || '';
+        const extraParams = config.extraParams || '';
+        if (!llamaBinPath && !cmd && !extraParams) {
+          showToast('error', window.I18N.t('page.chat.main.composer.model_action_load_no_config', '未找到启动配置，请先在首页配置启动参数'));
+          return;
+        }
+        const payload = {
+          modelId: id,
+          llamaBinPathSelect: llamaBinPath,
+          cmd: cmd,
+          extraParams: extraParams
+        };
+        if (nodeId && nodeId !== 'local') payload.nodeId = nodeId;
+        applyModelLoadingFlag(opt.value, true);
+        renderModelMenu();
+        const res = await fetch('/api/models/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(r => r.json());
+        if (!res || !res.success) {
+          applyModelLoadingFlag(opt.value, false);
+          renderModelMenu();
+          showToast('error', (res && res.error) ? res.error : window.I18N.t('page.chat.main.composer.model_action_load_failed', '加载失败'));
+          return;
+        }
+        if (res.data && res.data.async) {
+          scheduleModelLoadPoll(opt.value, Date.now() + 30000);
+        } else {
+          applyModelLoadingFlag(opt.value, false);
+          await refreshModels();
+          showToast('success', window.I18N.t('page.chat.main.composer.model_action_load_success', '模型加载成功'));
+          selectModel(opt.value);
+        }
+      } catch (err) {
+        applyModelLoadingFlag(opt.value, false);
+        renderModelMenu();
+        showToast('error', (err && err.message) ? err.message : window.I18N.t('page.chat.main.composer.model_action_load_failed', '加载失败'));
+      }
+    }
+
+    async function unloadModelFromMenu(opt) {
+      if (!opt || opt.isEmpty || !opt.statusLoaded) return;
+      const { id, nodeId } = splitModelValue(opt.value);
+      if (!id) return;
+      try {
+        const body = { modelId: id };
+        if (nodeId && nodeId !== 'local') body.nodeId = nodeId;
+        const res = await fetch('/api/models/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(r => r.json());
+        if (!res || !res.success) {
+          showToast('error', (res && res.error) ? res.error : window.I18N.t('page.chat.main.composer.model_action_unload_failed', '停止失败'));
+          return;
+        }
+        stopModelLoadPoll(opt.value);
+        applyModelLoadingFlag(opt.value, false);
+        await refreshModels();
+        showToast('success', window.I18N.t('page.chat.main.composer.model_action_unload_success', '模型已停止'));
+      } catch (err) {
+        showToast('error', (err && err.message) ? err.message : window.I18N.t('page.chat.main.composer.model_action_unload_failed', '停止失败'));
       }
     }
 
@@ -7285,7 +7447,8 @@
             nodeName: '',
             label: window.I18N.t('page.chat.main.status.no_models', '当前未发现可用模型'),
             statusLoaded: false,
-            isEmpty: true
+            isEmpty: true,
+            isLoading: false
           }];
           state.model = '';
         } else {
@@ -7305,7 +7468,8 @@
               nodeId,
               nodeName,
               label: nodeId ? '[' + nodeName + '] ' + id : id,
-              statusLoaded
+              statusLoaded,
+              isLoading: modelLoadingKeys.has(compositeKey)
             });
             if (nodeId) {
               modelNodeIdMap[compositeKey] = nodeId;
@@ -8381,6 +8545,23 @@ function confirmAudioRecording() {
       }
       if (els.modelMenuList) {
         els.modelMenuList.addEventListener('click', (event) => {
+          const actionBtn = event.target.closest('.model-menu-action[data-action]');
+          if (actionBtn) {
+            event.stopPropagation();
+            event.preventDefault();
+            const action = actionBtn.getAttribute('data-action');
+            if (action === 'loading') return;
+            const item = actionBtn.closest('.model-menu-item[data-value]');
+            if (!item) return;
+            const opt = findModelOption(item.dataset.value);
+            if (!opt) return;
+            if (action === 'load') {
+              void loadModelFromMenu(opt);
+            } else if (action === 'unload') {
+              void unloadModelFromMenu(opt);
+            }
+            return;
+          }
           const item = event.target.closest('.model-menu-item[data-value]');
           if (!item || item.disabled) return;
           selectModel(item.dataset.value);

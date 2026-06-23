@@ -405,13 +405,19 @@ public class ModelActionController implements BaseController {
 				return;
 			}
 
+			LlamaServerManager manager = LlamaServerManager.getInstance();
+			String resolvedModelId = manager.resolveModelId(modelId);
+			if (resolvedModelId != null) {
+				logger.info("[模型操作] 停止模型别名解析: {} -> {}", modelId, resolvedModelId);
+				modelId = resolvedModelId;
+			}
+
 			String nodeId = JsonUtil.getJsonString(obj, "nodeId");
 			if (nodeId != null && !nodeId.isBlank() && !"local".equals(nodeId)) {
 				this.stopRemoteModel(ctx, nodeId, modelId);
 				return;
 			}
 
-			LlamaServerManager manager = LlamaServerManager.getInstance();
 			if (manager.getLoadedProcesses().containsKey(modelId) || manager.isLoading(modelId)) {
 				logger.info("[模型操作] 本地停止模型: modelId={}", modelId);
 				boolean success = manager.stopModel(modelId);
@@ -456,10 +462,43 @@ public class ModelActionController implements BaseController {
 		JsonObject body = new JsonObject();
 		body.addProperty("modelId", modelId);
 		NodeManager.HttpResult result = manager.callRemoteApi(nodeId, "POST", "api/models/stop", body);
-		if (result.isSuccess()) {
-			LlamaServer.sendJsonResponse(ctx, ApiResponse.success());
-		} else {
+		if (!result.isSuccess()) {
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: " + result.getBody()));
+			return;
+		}
+		String remoteError = this.extractRemoteError(result.getBody());
+		if (remoteError != null) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error(remoteError));
+		} else {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.success());
+		}
+	}
+
+	/**
+	 * 解析远程节点返回的 JSON，提取业务层错误信息。
+	 * 仅当存在 success=false 时返回对应 error 字段；否则返回 null 视为成功。
+	 */
+	private String extractRemoteError(String responseBody) {
+		if (responseBody == null || responseBody.isBlank()) {
+			return null;
+		}
+		try {
+			JsonObject root = JsonUtil.fromJson(responseBody, JsonObject.class);
+			if (root == null || !root.has("success")) {
+				return null;
+			}
+			com.google.gson.JsonElement successEl = root.get("success");
+			if (successEl != null && successEl.isJsonPrimitive() && successEl.getAsJsonPrimitive().isBoolean() && successEl.getAsBoolean()) {
+				return null;
+			}
+			String error = JsonUtil.getJsonString(root, "error");
+			if (error == null || error.isEmpty()) {
+				error = "远程节点操作失败";
+			}
+			return error;
+		} catch (Exception e) {
+			logger.warn("[模型操作] 解析远程响应JSON失败: error={}", e.getMessage());
+			return null;
 		}
 	}
 	
@@ -735,12 +774,17 @@ public class ModelActionController implements BaseController {
 		}
 		NodeManager manager = NodeManager.getInstance();
 		NodeManager.HttpResult result = manager.callRemoteApi(nodeId, "POST", "api/models/load", body);
-		if (result.isSuccess()) {
+		if (!result.isSuccess()) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: " + result.getBody()));
+			return;
+		}
+		String remoteError = this.extractRemoteError(result.getBody());
+		if (remoteError != null) {
+			LlamaServer.sendJsonResponse(ctx, ApiResponse.error(remoteError));
+		} else {
 			Map<String, Object> data = new HashMap<>();
 			data.put("async", true);
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(data));
-		} else {
-			LlamaServer.sendJsonResponse(ctx, ApiResponse.error("远程节点调用失败: " + result.getBody()));
 		}
 	}
 	
