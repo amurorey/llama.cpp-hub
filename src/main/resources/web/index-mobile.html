@@ -731,6 +731,28 @@
                                 <small class="form-text" data-i18n="modal.model_action.auto_load.desc">开启后，当 API 请求此模型但未加载时，将自动加载该模型（需硬件资源充足）</small>
                             </div>
 
+                            <div class="form-group" id="autoUnloadGroup">
+                                <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input class="form-check-input" type="checkbox" id="autoUnloadToggle">
+                                    <span data-i18n="modal.model_action.auto_unload.title">允许自动卸载</span>
+                                    <i class="fas fa-circle-question param-desc-trigger"
+                                        style="font-size:11px;color:#8fa7c0;cursor:pointer;"
+                                        data-i18n="modal.model_action.auto_unload.help_title" data-i18n-attr="title"
+                                        title="..."
+                                        data-param-name="modal.model_action.auto_unload.help_title"
+                                        data-param-flag=""
+                                        data-param-desc="modal.model_action.auto_unload.help_desc"></i>
+                                </label>
+                                <small class="form-text" data-i18n="modal.model_action.auto_unload.desc">开启后，当模型超过指定时间未被使用，将自动卸载以释放资源</small>
+                                <div id="autoUnloadTimeoutRow" style="display:none;margin-top:6px;align-items:center;gap:8px;">
+                                    <input type="number" class="form-control" id="autoUnloadTimeoutInput"
+                                        min="1" step="1" value="30"
+                                        style="width:100px;padding:4px 8px;font-size:13px;"
+                                        placeholder="分钟">
+                                    <span style="font-size:12px;color:var(--text-secondary);">分钟</span>
+                                </div>
+                            </div>
+
                             <div class="form-group" id="enableVisionGroup" style="display:none;">
                                 <label class="form-label">启用视觉</label>
                                 <div class="form-check" style="margin-bottom: 0;">

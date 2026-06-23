@@ -4140,6 +4140,31 @@ llama.cpp-hub</textarea>
                                     data-i18n="modal.model_action.auto_load.desc">modal.model_action.auto_load.desc</small>
                             </div>
 
+                            <div class="form-group" id="autoUnloadGroup">
+                                <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                                    <input class="form-check-input" type="checkbox" id="autoUnloadToggle">
+                                    <span data-i18n="modal.model_action.auto_unload.title">modal.model_action.auto_unload.title</span>
+                                    <i class="fas fa-circle-question param-desc-trigger"
+                                        style="font-size:11px;color:#8fa7c0;cursor:pointer;"
+                                        data-i18n="modal.model_action.auto_unload.help_title" data-i18n-attr="title"
+                                        title="..."
+                                        data-param-name="modal.model_action.auto_unload.help_title"
+                                        data-param-flag=""
+                                        data-param-desc="modal.model_action.auto_unload.help_desc"></i>
+                                </label>
+                                <small class="form-text"
+                                    data-i18n="modal.model_action.auto_unload.desc">modal.model_action.auto_unload.desc</small>
+                                <div id="autoUnloadTimeoutRow" style="display:none;margin-top:6px;align-items:center;gap:8px;">
+                                    <input type="number" class="form-control" id="autoUnloadTimeoutInput"
+                                        min="1" step="1" value="30"
+                                        style="width:100px;padding:4px 8px;font-size:13px;"
+                                        data-i18n-attr-placeholder="modal.model_action.auto_unload.timeout_placeholder"
+                                        placeholder="分钟">
+                                    <span style="font-size:12px;color:var(--text-secondary);"
+                                        data-i18n="modal.model_action.auto_unload.timeout_unit">分钟</span>
+                                </div>
+                            </div>
+
                             <div class="form-group" id="enableVisionGroup" style="display:none;">
                                 <label class="form-label"
                                     data-i18n="modal.model_action.vision.title">modal.model_action.vision.title</label>

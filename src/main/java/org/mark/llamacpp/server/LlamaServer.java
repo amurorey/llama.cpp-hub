@@ -168,6 +168,7 @@ public class LlamaServer {
 		serverManager.listModel();
 
 		AutoLoadPolicyManager.getInstance().loadConfig();
+		serverManager.startAutoUnloadScheduler();
 
 		ModelSamplingService.getInstance();
 

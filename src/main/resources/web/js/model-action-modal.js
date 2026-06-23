@@ -1060,6 +1060,129 @@ function loadAutoLoadPolicy(modelId, modal, nodeId) {
         });
 }
 
+function ensureAutoUnloadWired(modal) {
+    const toggle = findById(modal, 'autoUnloadToggle');
+    if (!toggle) return;
+    if (toggle.getAttribute('data-wired') === '1') return;
+    toggle.setAttribute('data-wired', '1');
+
+    const timeoutRow = findById(modal, 'autoUnloadTimeoutRow');
+    const timeoutInput = findById(modal, 'autoUnloadTimeoutInput');
+
+    toggle.addEventListener('change', () => {
+        if (timeoutRow) {
+            timeoutRow.style.display = toggle.checked ? 'flex' : 'none';
+        }
+        const modelId = getFieldString(modal, ['modelId']);
+        if (!modelId) return;
+        const nodeId = modal.__nodeId || '';
+        if (toggle.checked) {
+            const minutes = timeoutInput ? parseInt(timeoutInput.value, 10) : 0;
+            if (!(minutes > 0)) {
+                toggle.checked = false;
+                if (timeoutRow) timeoutRow.style.display = 'none';
+                showToast(t('toast.error', '错误'), t('modal.model_action.auto_unload.timeout_required', '请先填写大于 0 的空闲超时时间'), 'error');
+                if (timeoutInput) timeoutInput.focus();
+                return;
+            }
+        }
+        const mode = toggle.checked ? 'allow' : 'deny';
+        const body = { modelId: modelId, autoUnload: mode };
+        if (nodeId && nodeId !== 'local') body.nodeId = nodeId;
+        if (toggle.checked && timeoutInput) {
+            const minutes = parseInt(timeoutInput.value, 10);
+            if (minutes > 0) {
+                body.autoUnloadTimeoutMs = minutes * 60 * 1000;
+            }
+        }
+        fetch('/api/auto-load/policy', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        }).then(r => r.json()).then(d => {
+            if (!d.success) {
+                toggle.checked = !toggle.checked;
+                if (timeoutRow) timeoutRow.style.display = toggle.checked ? 'flex' : 'none';
+                showToast(t('toast.error', '错误'), d.error || t('modal.model_action.auto_unload.failed', '设置自动卸载策略失败'), 'error');
+            }
+        }).catch(() => {
+            toggle.checked = !toggle.checked;
+            if (timeoutRow) timeoutRow.style.display = toggle.checked ? 'flex' : 'none';
+            showToast(t('toast.error', '错误'), t('modal.model_action.auto_unload.failed', '设置自动卸载策略失败'), 'error');
+        });
+    });
+
+    if (timeoutInput) {
+        let debounceTimer = null;
+        timeoutInput.addEventListener('input', () => {
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                if (!toggle.checked) return;
+                const modelId = getFieldString(modal, ['modelId']);
+                if (!modelId) return;
+                const minutes = parseInt(timeoutInput.value, 10);
+                if (minutes <= 0) return;
+                const nodeId = modal.__nodeId || '';
+                const body = { modelId: modelId, autoUnloadTimeoutMs: minutes * 60 * 1000 };
+                if (nodeId && nodeId !== 'local') body.nodeId = nodeId;
+                fetch('/api/auto-load/policy', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                }).then(r => r.json()).then(d => {
+                    if (!d.success) {
+                        showToast(t('toast.error', '错误'), d.error || t('modal.model_action.auto_unload.failed', '设置自动卸载策略失败'), 'error');
+                    }
+                }).catch(() => {
+                    showToast(t('toast.error', '错误'), t('modal.model_action.auto_unload.failed', '设置自动卸载策略失败'), 'error');
+                });
+            }, 500);
+        });
+    }
+}
+
+function loadAutoUnloadPolicy(modelId, modal, nodeId) {
+    const mid = modelId === null || modelId === undefined ? '' : String(modelId).trim();
+    if (!mid) return;
+    const nid = (nodeId && nodeId !== 'local') ? nodeId : '';
+    const url = '/api/auto-load/policy' + (mid ? '?modelId=' + encodeURIComponent(mid) : '') + (nid ? '&nodeId=' + encodeURIComponent(nid) : '');
+    fetch(url)
+        .then(r => r.json())
+        .then(res => {
+            const data = res && res.data ? res.data : null;
+            const unloadPolicies = data && data.autoUnload ? data.autoUnload : {};
+            const unloadPolicy = unloadPolicies[mid] || 'deny';
+            const toggle = findById(modal, 'autoUnloadToggle');
+            const timeoutRow = findById(modal, 'autoUnloadTimeoutRow');
+            const timeoutInput = findById(modal, 'autoUnloadTimeoutInput');
+            if (toggle) {
+                toggle.checked = unloadPolicy === 'allow';
+            }
+            if (timeoutRow) {
+                timeoutRow.style.display = (toggle && toggle.checked) ? 'flex' : 'none';
+            }
+            if (timeoutInput && data && data.models && data.models[mid]) {
+                const modelInfo = data.models[mid];
+                if (modelInfo.autoUnloadTimeoutMs) {
+                    const minutes = Math.round(modelInfo.autoUnloadTimeoutMs / 60000);
+                    if (minutes > 0) {
+                        timeoutInput.value = minutes;
+                    }
+                }
+            }
+        })
+        .catch(() => {
+            const toggle = findById(modal, 'autoUnloadToggle');
+            const timeoutRow = findById(modal, 'autoUnloadTimeoutRow');
+            if (toggle) {
+                toggle.checked = false;
+            }
+            if (timeoutRow) {
+                timeoutRow.style.display = 'none';
+            }
+        });
+}
+
 function getCurrentModelById(modelId, nodeId) {
     const mid = modelId === null || modelId === undefined ? '' : String(modelId).trim();
     if (!mid) return null;
@@ -1180,6 +1303,8 @@ function loadModel(modelId, modelName, param1, param2) {
     loadModelCapabilities(modelId, modal);
     ensureAutoLoadWired(modal);
     loadAutoLoadPolicy(modelId, modal, nodeId);
+    ensureAutoUnloadWired(modal);
+    loadAutoUnloadPolicy(modelId, modal, nodeId);
     window.__loadModelSelectedDevices = ['All'];
     window.__loadModelSelectionFromConfig = true;
     const deviceChecklistEl = findById(modal, 'deviceChecklist');

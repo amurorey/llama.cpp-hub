@@ -71,6 +71,48 @@ public class AutoLoadPolicyManager {
 	}
 
 	/**
+	 * 检查模型是否允许自动卸载（委托给 LlamaServerManager）
+	 */
+	public boolean canAutoUnload(String modelId) {
+		return manager.canAutoUnload(modelId);
+	}
+
+	/**
+	 * 设置模型的自动卸载策略（委托给 LlamaServerManager）
+	 */
+	public String setAutoUnloadPolicy(String modelId, String mode) {
+		return manager.setAutoUnloadPolicy(modelId, mode);
+	}
+
+	/**
+	 * 重置模型的自动卸载策略（委托给 LlamaServerManager）
+	 */
+	public String resetAutoUnloadPolicy(String modelId) {
+		return manager.resetAutoUnloadPolicy(modelId);
+	}
+
+	/**
+	 * 获取模型的自动卸载超时时间（毫秒）
+	 */
+	public Long getAutoUnloadTimeoutMs(String modelId) {
+		return manager.getAutoUnloadTimeoutMs(modelId);
+	}
+
+	/**
+	 * 设置模型的自动卸载超时时间（毫秒）
+	 */
+	public String setAutoUnloadTimeoutMs(String modelId, long timeoutMs) {
+		return manager.setAutoUnloadTimeoutMs(modelId, timeoutMs);
+	}
+
+	/**
+	 * 重置模型的自动卸载超时时间
+	 */
+	public String resetAutoUnloadTimeoutMs(String modelId) {
+		return manager.resetAutoUnloadTimeoutMs(modelId);
+	}
+
+	/**
 	 * 获取单个模型的自动加载策略
 	 */
 	public Map<String, Object> getPolicyForModel(String modelId) {
@@ -79,7 +121,22 @@ public class AutoLoadPolicyManager {
 		Map<String, Object> policiesMap = new HashMap<>();
 		policiesMap.put(modelId, policy != null ? policy : "deny");
 		result.put("policies", policiesMap);
-		result.put("models", new HashMap<>());
+
+		String unloadPolicy = manager.getAutoUnloadPolicy(modelId);
+		Map<String, Object> unloadPoliciesMap = new HashMap<>();
+		unloadPoliciesMap.put(modelId, unloadPolicy != null ? unloadPolicy : "deny");
+		result.put("autoUnload", unloadPoliciesMap);
+
+		Map<String, Object> modelsMap = new HashMap<>();
+		Map<String, Object> modelInfo = new HashMap<>();
+		modelInfo.put("modelId", modelId);
+		Long unloadTimeout = manager.getAutoUnloadTimeoutMs(modelId);
+		if (unloadTimeout != null) {
+			modelInfo.put("autoUnloadTimeoutMs", unloadTimeout);
+		}
+		modelsMap.put(modelId, modelInfo);
+		result.put("models", modelsMap);
+
 		return result;
 	}
 
@@ -91,15 +148,23 @@ public class AutoLoadPolicyManager {
 
 		List<GGUFModel> models = manager.listModel();
 		Map<String, String> allPolicies = manager.getAllAutoLoadPolicies();
+		Map<String, String> allUnloadPolicies = manager.getAllAutoUnloadPolicies();
+		Map<String, Long> allUnloadTimeouts = manager.getAllAutoUnloadTimeouts();
 
 		Map<String, Object> modelsMap = new HashMap<>();
 		for (GGUFModel model : models) {
 			String modelId = model.getModelId();
 			String policy = allPolicies.get(modelId);
+			String unloadPolicy = allUnloadPolicies.get(modelId);
+			Long unloadTimeout = allUnloadTimeouts.get(modelId);
 			Map<String, Object> modelInfo = new HashMap<>();
 			modelInfo.put("modelId", modelId);
 			modelInfo.put("modelName", model.getName());
 			modelInfo.put("policy", policy != null ? policy : "deny");
+			modelInfo.put("autoUnload", unloadPolicy != null ? unloadPolicy : "deny");
+			if (unloadTimeout != null) {
+				modelInfo.put("autoUnloadTimeoutMs", unloadTimeout);
+			}
 			modelsMap.put(modelId, modelInfo);
 		}
 
@@ -108,7 +173,13 @@ public class AutoLoadPolicyManager {
 			policiesMap.put(entry.getKey(), entry.getValue());
 		}
 
+		Map<String, Object> unloadPoliciesMap = new HashMap<>();
+		for (Map.Entry<String, String> entry : allUnloadPolicies.entrySet()) {
+			unloadPoliciesMap.put(entry.getKey(), entry.getValue());
+		}
+
 		result.put("policies", policiesMap);
+		result.put("autoUnload", unloadPoliciesMap);
 		result.put("models", modelsMap);
 
 		return result;

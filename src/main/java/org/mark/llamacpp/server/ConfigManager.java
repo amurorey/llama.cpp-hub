@@ -889,4 +889,188 @@ public class ConfigManager {
 		}
 	}
 
+	/**
+	 * 获取模型的自动卸载策略
+	 * @param modelId 模型 ID
+	 * @return "allow", "deny", 或 null（未设置）
+	 */
+	public String getAutoUnloadPolicy(String modelId) {
+		synchronized (launchFileLock) {
+			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+			Map<String, Object> entry = allConfigs.get(modelId);
+			if (entry == null) {
+				return null;
+			}
+			Object autoUnload = entry.get("autoUnload");
+			if (autoUnload == null) {
+				return null;
+			}
+			return String.valueOf(autoUnload);
+		}
+	}
+
+	/**
+	 * 批量获取所有模型的自动卸载策略（一次性读取配置文件）
+	 * @return 模型ID到策略的映射
+	 */
+	public Map<String, String> getAllAutoUnloadPolicies() {
+		synchronized (launchFileLock) {
+			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+			Map<String, String> policies = new HashMap<>();
+			for (Map.Entry<String, Map<String, Object>> entry : allConfigs.entrySet()) {
+				Object autoUnload = entry.getValue().get("autoUnload");
+				if (autoUnload != null) {
+					policies.put(entry.getKey(), String.valueOf(autoUnload));
+				}
+			}
+			return policies;
+		}
+	}
+
+	/**
+	 * 批量获取所有模型的自动卸载超时时间（一次性读取配置文件）
+	 * @return 模型ID到超时时间（毫秒）的映射，未设置的不包含在内
+	 */
+	public Map<String, Long> getAllAutoUnloadTimeouts() {
+		synchronized (launchFileLock) {
+			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+			Map<String, Long> timeouts = new HashMap<>();
+			for (Map.Entry<String, Map<String, Object>> entry : allConfigs.entrySet()) {
+				Object timeout = entry.getValue().get("autoUnloadTimeoutMs");
+				if (timeout != null) {
+					try {
+						timeouts.put(entry.getKey(), ((Number) timeout).longValue());
+					} catch (Exception e) {
+						// 忽略格式错误的超时值
+					}
+				}
+			}
+			return timeouts;
+		}
+	}
+
+	/**
+	 * 设置模型的自动卸载策略
+	 * @param modelId 模型 ID
+	 * @param mode "allow" 或 "deny"
+	 * @return 是否保存成功
+	 */
+	public boolean setAutoUnloadPolicy(String modelId, String mode) {
+		synchronized (launchFileLock) {
+			try {
+				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				Map<String, Object> entry = allConfigs.get(modelId);
+				if (entry == null) {
+					entry = new HashMap<>();
+					allConfigs.put(modelId, entry);
+				}
+				entry.put("autoUnload", mode);
+				writeJsonFileAtomic(LAUNCH_CONFIG_FILE, allConfigs);
+				logger.info("自动卸载策略已设置: modelId={}, mode={}", modelId, mode);
+				return true;
+			} catch (IOException e) {
+				logger.info("设置自动卸载策略失败: {}", e);
+				return false;
+			}
+		}
+	}
+
+	/**
+	 * 重置模型的自动卸载策略（删除 autoUnload 字段）
+	 * @param modelId 模型 ID
+	 * @return 是否保存成功
+	 */
+	public boolean resetAutoUnloadPolicy(String modelId) {
+		synchronized (launchFileLock) {
+			try {
+				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				Map<String, Object> entry = allConfigs.get(modelId);
+				if (entry == null) {
+					return true;
+				}
+				entry.remove("autoUnload");
+				writeJsonFileAtomic(LAUNCH_CONFIG_FILE, allConfigs);
+				logger.info("自动卸载策略已重置: modelId={}", modelId);
+				return true;
+			} catch (IOException e) {
+				logger.info("重置自动卸载策略失败: {}", e);
+				return false;
+			}
+		}
+	}
+
+	/**
+	 * 获取模型的自动卸载超时时间（毫秒）
+	 * @param modelId 模型 ID
+	 * @return 超时时间，未设置返回 null
+	 */
+	public Long getAutoUnloadTimeoutMs(String modelId) {
+		synchronized (launchFileLock) {
+			Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+			Map<String, Object> entry = allConfigs.get(modelId);
+			if (entry == null) {
+				return null;
+			}
+			Object timeout = entry.get("autoUnloadTimeoutMs");
+			if (timeout == null) {
+				return null;
+			}
+			try {
+				return ((Number) timeout).longValue();
+			} catch (Exception e) {
+				return null;
+			}
+		}
+	}
+
+	/**
+	 * 设置模型的自动卸载超时时间（毫秒）
+	 * @param modelId 模型 ID
+	 * @param timeoutMs 超时时间（毫秒）
+	 * @return 是否保存成功
+	 */
+	public boolean setAutoUnloadTimeoutMs(String modelId, long timeoutMs) {
+		synchronized (launchFileLock) {
+			try {
+				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				Map<String, Object> entry = allConfigs.get(modelId);
+				if (entry == null) {
+					entry = new HashMap<>();
+					allConfigs.put(modelId, entry);
+				}
+				entry.put("autoUnloadTimeoutMs", timeoutMs);
+				writeJsonFileAtomic(LAUNCH_CONFIG_FILE, allConfigs);
+				logger.info("自动卸载超时时间已设置: modelId={}, timeoutMs={}", modelId, timeoutMs);
+				return true;
+			} catch (IOException e) {
+				logger.info("设置自动卸载超时时间失败: {}", e);
+				return false;
+			}
+		}
+	}
+
+	/**
+	 * 重置模型的自动卸载超时时间（删除 autoUnloadTimeoutMs 字段）
+	 * @param modelId 模型 ID
+	 * @return 是否保存成功
+	 */
+	public boolean resetAutoUnloadTimeoutMs(String modelId) {
+		synchronized (launchFileLock) {
+			try {
+				Map<String, Map<String, Object>> allConfigs = loadAllLaunchConfigsUnsafe();
+				Map<String, Object> entry = allConfigs.get(modelId);
+				if (entry == null) {
+					return true;
+				}
+				entry.remove("autoUnloadTimeoutMs");
+				writeJsonFileAtomic(LAUNCH_CONFIG_FILE, allConfigs);
+				logger.info("自动卸载超时时间已重置: modelId={}", modelId);
+				return true;
+			} catch (IOException e) {
+				logger.info("重置自动卸载超时时间失败: {}", e);
+				return false;
+			}
+		}
+	}
+
 }

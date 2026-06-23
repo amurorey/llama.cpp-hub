@@ -295,6 +295,7 @@ public class OpenAIService {
 		String loadError = manager.autoLoadModelFromConfig(modelName, timeout);
 		if (loadError == null) {
 			logger.info("[自动加载] 加载成功: model={}", modelName);
+			manager.updateModelLastUsedTime(modelName);
 		} else {
 			logger.warn("[自动加载] 加载失败: model={}, error={}", modelName, loadError);
 		}
@@ -370,6 +371,7 @@ public class OpenAIService {
 					}
 				}
 				if (manager.getLoadedProcesses().containsKey(modelName)) {
+					manager.updateModelLastUsedTime(modelName);
 					localPort = manager.getModelPort(modelName);
 					if (localPort != null) {
 						targetUrl = String.format("http://localhost:%d/v1/completions", localPort.intValue());
@@ -477,6 +479,7 @@ public class OpenAIService {
 						}
 					}
 					if (manager.getLoadedProcesses().containsKey(modelName)) {
+						manager.updateModelLastUsedTime(modelName);
 						localPort = manager.getModelPort(modelName);
 						if (localPort != null) {
 							targetUrl = String.format("http://localhost:%d/v1/embeddings", localPort.intValue());
@@ -1049,6 +1052,7 @@ public class OpenAIService {
 						}
 					}
 					if (manager.getLoadedProcesses().containsKey(modelName)) {
+						manager.updateModelLastUsedTime(modelName);
 						localPort = manager.getModelPort(modelName);
 						if (localPort != null) {
 							targetUrl = String.format("http://localhost:%d%s", localPort.intValue(), endpoint);
@@ -1165,6 +1169,7 @@ public class OpenAIService {
 						}
 					}
 					if (manager.getLoadedProcesses().containsKey(modelName)) {
+						manager.updateModelLastUsedTime(modelName);
 						localPort = manager.getModelPort(modelName);
 						if (localPort != null) {
 							targetUrl = String.format("http://localhost:%d%s", localPort.intValue(), endpoint);

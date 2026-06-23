@@ -8,6 +8,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import org.mark.llamacpp.server.LlamaServerManager;
 import org.mark.llamacpp.server.struct.ActiveRequest;
 import org.mark.llamacpp.server.struct.ActiveRequest.Phase;
 import org.mark.llamacpp.server.struct.Timing;
@@ -53,6 +54,13 @@ public class ModelRequestTracker {
         }
         boolean stillBusy = modelActiveRequests.containsKey(modelId);
         broadcastBusy(modelId, stillBusy);
+        // 请求结束后刷新模型的最后使用时间，使空闲卸载计时从「请求结束后」开始
+        if (modelId != null) {
+            try {
+                LlamaServerManager.getInstance().updateModelLastUsedTime(modelId);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     public ActiveRequest getActiveRequest(String requestId) {

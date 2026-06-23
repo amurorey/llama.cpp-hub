@@ -241,12 +241,15 @@ public class AnthropicService {
                 String loadError = manager.autoLoadModelFromConfig(modelName, timeout);
                 if (loadError == null) {
                     logger.info("[Anthropic] 自动加载成功: model={}", modelName);
+                    manager.updateModelLastUsedTime(modelName);
                 } else {
                     logger.warn("[Anthropic] 自动加载失败: model={}, error={}", modelName, loadError);
                     this.sendError(ctx, HttpResponseStatus.INTERNAL_SERVER_ERROR, loadError);
                     return;
                 }
             }
+        } else {
+            manager.updateModelLastUsedTime(modelName);
         }
 
         Integer port = manager.getModelPort(modelName);

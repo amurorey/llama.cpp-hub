@@ -372,11 +372,17 @@ public class EasyChatService {
 				HttpURLConnection connection = null;
 				StreamAccumulator accumulator = new StreamAccumulator();
 				Path indexPath = finalConvDir == null ? null : storage.indexFile(finalConvDir);
+				String trackerRequestId = null;
 				try {
 					// Double-check cancellation after acquiring a worker thread.
 					if (!ctx.channel().isActive()) {
 						logger.info("[EasyChat] worker启动时channel已关闭，直接退出");
 						return;
+					}
+
+					// 本地请求注册到活跃请求计数器，用于自动卸载的在用保护
+					if (!finalIsRemoteNode) {
+						trackerRequestId = ModelRequestTracker.getInstance().createRequest(finalModelId, "easy-chat");
 					}
 
 					if (finalIsRemoteNode) {
@@ -489,11 +495,14 @@ public class EasyChatService {
 							logger.warn("[EasyChat] 异常状态下记录用量失败 conversation={}", conversationId, ex);
 						}
 					}
-					sendOpenAIError(ctx, 500, e.getMessage());
-				} finally {
-					cleanupConnection(ctx);
-					finalGlobalLease.close();
+				sendOpenAIError(ctx, 500, e.getMessage());
+			} finally {
+				if (trackerRequestId != null) {
+					ModelRequestTracker.getInstance().removeRequest(trackerRequestId);
 				}
+				cleanupConnection(ctx);
+				finalGlobalLease.close();
+			}
 			});
 			globalLease = null;
 
@@ -724,6 +733,7 @@ public class EasyChatService {
 						return ModelTarget.error("自动加载后未找到模型端口: " + resolvedModelId);
 					}
 					logger.info("[EasyChat][自动加载] 加载成功: model={}, port={}", resolvedModelId, modelPort);
+					manager.updateModelLastUsedTime(resolvedModelId);
 				} else {
 					logger.warn("[EasyChat][自动加载] 加载失败: model={}, error={}", resolvedModelId, loadError);
 					return ModelTarget.error("模型加载失败: " + loadError);
@@ -731,6 +741,8 @@ public class EasyChatService {
 			} else {
 				return ModelTarget.error("模型未找到: " + resolvedModelId);
 			}
+		} else {
+			manager.updateModelLastUsedTime(resolvedModelId);
 		}
 		if (modelPort == null) {
 			modelPort = manager.getModelPort(resolvedModelId);

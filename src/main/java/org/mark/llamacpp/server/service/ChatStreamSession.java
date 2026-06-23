@@ -54,6 +54,8 @@ public class ChatStreamSession {
 	private volatile String requestId;
 	private volatile boolean receivedBody;
 	private volatile String routingNodeId;
+	// 本地模型解析后的真实 modelId（用于活跃请求计数）；远程路由时为 null
+	private volatile String resolvedModelId;
 
 
 
@@ -221,7 +223,7 @@ public class ChatStreamSession {
 			connOutput.flush();
 			connOutput.close();
 
-			this.requestId = ModelRequestTracker.getInstance().createRequest(result.getModelName(), this.endpoint);
+			this.requestId = ModelRequestTracker.getInstance().createRequest(this.resolvedModelId != null ? this.resolvedModelId : result.getModelName(), this.endpoint);
 			if (this.cancelled.get()) {
 				logger.info("聊天流式会话已取消，中止请求");
 				return;
@@ -344,17 +346,21 @@ public class ChatStreamSession {
 						Integer modelPort = manager.getModelPort(modelName);
 						if (modelPort != null) {
 							logger.info("[Node路由] 自动加载成功: model={}, port={}", modelName, modelPort);
+							manager.updateModelLastUsedTime(modelName);
+							this.resolvedModelId = modelName;
 							return String.format("http://localhost:%d%s", modelPort.intValue(), this.endpoint);
 						}
 					}
 					logger.warn("[Node路由] 自动加载失败: model={}, error={}", modelName, loadError);
-					throw new StreamingForwarder.ForwarderException(500,
-						loadError != null ? loadError : "Model load failed: " + modelName, "model");
-				}
-				logger.info("[Node路由] 自动加载被策略拒绝: model={}", modelName);
-				logger.info("[Node路由] 本地模型未加载: model={}, loadedModels={}", modelName, manager.getLoadedProcesses().keySet());
-				return null;
+				throw new StreamingForwarder.ForwarderException(500,
+					loadError != null ? loadError : "Model load failed: " + modelName, "model");
 			}
+			logger.info("[Node路由] 自动加载被策略拒绝: model={}", modelName);
+			logger.info("[Node路由] 本地模型未加载: model={}, loadedModels={}", modelName, manager.getLoadedProcesses().keySet());
+			return null;
+		}
+			manager.updateModelLastUsedTime(modelName);
+			this.resolvedModelId = modelName;
 			Integer modelPort = manager.getModelPort(modelName);
 			if (modelPort == null) {
 				logger.warn("[Node路由] 本地模型端口未找到: model={}", modelName);

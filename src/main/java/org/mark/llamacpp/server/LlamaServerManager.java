@@ -39,6 +39,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -46,6 +47,7 @@ import java.util.stream.Stream;
 import org.mark.llamacpp.gguf.GGUFBundle;
 import org.mark.llamacpp.gguf.GGUFMetaData;
 import org.mark.llamacpp.gguf.GGUFModel;
+import org.mark.llamacpp.server.service.ModelRequestTracker;
 import org.mark.llamacpp.server.struct.ApiResponse;
 import org.mark.llamacpp.server.struct.ModelPathConfig;
 import org.mark.llamacpp.server.struct.ModelPathDataStruct;
@@ -151,6 +153,11 @@ public class LlamaServerManager {
 	 */
 	private Map<String, Integer> modelPorts = new HashMap<>();
 
+	/**
+	 * 模型ID到最后使用时间映射（毫秒时间戳）
+	 */
+	private Map<String, Long> modelLastUsedTime = new ConcurrentHashMap<>();
+
 	private final Map<String, JsonObject> loadedModelInfos = new ConcurrentHashMap<>();
 	
 	/**
@@ -162,8 +169,11 @@ public class LlamaServerManager {
 	 * 线程池，用于异步执行模型加载任务
 	 */
 	private final ExecutorService executorService = Executors.newSingleThreadExecutor(Thread.ofVirtual().name("llama-loader-", 0).factory());
-	
-//	private final ScheduledExecutorService slotsScheduler = new ScheduledThreadPoolExecutor(1, Thread.ofVirtual().name("llama-slots-", 0).factory());
+
+	/**
+	 * 自动卸载调度器，用于定期检查并卸载空闲模型
+	 */
+	private final ScheduledExecutorService autoUnloadScheduler = Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("llama-auto-unload-", 0).factory());
 	
 	/**
 	 *
@@ -795,6 +805,192 @@ public class LlamaServerManager {
 		configManager.resetAutoLoadPolicy(resolved);
 		buildAutoLoadModelCache();
 		return null;
+	}
+
+	/**
+	 * 获取模型的自动卸载策略
+	 * @param modelId 模型 ID 或别名
+	 * @return "allow", "deny", 或 null（未设置）
+	 */
+	public String getAutoUnloadPolicy(String modelId) {
+		String resolved = resolveModelId(modelId);
+		if (resolved == null) return null;
+		return configManager.getAutoUnloadPolicy(resolved);
+	}
+
+	/**
+	 * 批量获取所有模型的自动卸载策略
+	 * @return 模型ID到策略的映射
+	 */
+	public Map<String, String> getAllAutoUnloadPolicies() {
+		return configManager.getAllAutoUnloadPolicies();
+	}
+
+	/**
+	 * 批量获取所有模型的自动卸载超时时间（一次性读取配置文件）
+	 * @return 模型ID到超时时间（毫秒）的映射，未设置的不包含在内
+	 */
+	public Map<String, Long> getAllAutoUnloadTimeouts() {
+		return configManager.getAllAutoUnloadTimeouts();
+	}
+
+	/**
+	 * 设置模型的自动卸载策略
+	 * @param modelId 模型 ID 或别名
+	 * @param mode "allow" 或 "deny"
+	 * @return null 表示成功，非 null 为错误信息
+	 */
+	public String setAutoUnloadPolicy(String modelId, String mode) {
+		String resolved = resolveModelId(modelId);
+		if (resolved == null) {
+			return "Model not found: " + modelId;
+		}
+		configManager.setAutoUnloadPolicy(resolved, mode);
+		return null;
+	}
+
+	/**
+	 * 重置模型的自动卸载策略（删除 autoUnload 字段）
+	 * @param modelId 模型 ID 或别名
+	 * @return null 表示成功，非 null 为错误信息
+	 */
+	public String resetAutoUnloadPolicy(String modelId) {
+		String resolved = resolveModelId(modelId);
+		if (resolved == null) {
+			return "Model not found: " + modelId;
+		}
+		configManager.resetAutoUnloadPolicy(resolved);
+		return null;
+	}
+
+	/**
+	 * 获取模型的自动卸载超时时间（毫秒）
+	 * @param modelId 模型 ID 或别名
+	 * @return 超时时间，未设置返回 null
+	 */
+	public Long getAutoUnloadTimeoutMs(String modelId) {
+		String resolved = resolveModelId(modelId);
+		if (resolved == null) return null;
+		return configManager.getAutoUnloadTimeoutMs(resolved);
+	}
+
+	/**
+	 * 设置模型的自动卸载超时时间（毫秒）
+	 * @param modelId 模型 ID 或别名
+	 * @param timeoutMs 超时时间（毫秒）
+	 * @return null 表示成功，非 null 为错误信息
+	 */
+	public String setAutoUnloadTimeoutMs(String modelId, long timeoutMs) {
+		String resolved = resolveModelId(modelId);
+		if (resolved == null) {
+			return "Model not found: " + modelId;
+		}
+		configManager.setAutoUnloadTimeoutMs(resolved, timeoutMs);
+		return null;
+	}
+
+	/**
+	 * 重置模型的自动卸载超时时间（删除 autoUnloadTimeoutMs 字段）
+	 * @param modelId 模型 ID 或别名
+	 * @return null 表示成功，非 null 为错误信息
+	 */
+	public String resetAutoUnloadTimeoutMs(String modelId) {
+		String resolved = resolveModelId(modelId);
+		if (resolved == null) {
+			return "Model not found: " + modelId;
+		}
+		configManager.resetAutoUnloadTimeoutMs(resolved);
+		return null;
+	}
+
+	/**
+	 * 检查模型是否允许自动卸载
+	 * @param modelId 模型 ID 或别名
+	 * @return true 如果允许自动卸载
+	 */
+	public boolean canAutoUnload(String modelId) {
+		String mode = getAutoUnloadPolicy(modelId);
+		return "allow".equalsIgnoreCase(mode);
+	}
+
+	/**
+	 * 更新模型的最后使用时间
+	 * @param modelId 模型 ID
+	 */
+	public void updateModelLastUsedTime(String modelId) {
+		if (modelId != null && !modelId.trim().isEmpty()) {
+			modelLastUsedTime.put(modelId.trim(), System.currentTimeMillis());
+		}
+	}
+
+	/**
+	 * 获取模型的最后使用时间
+	 * @param modelId 模型 ID
+	 * @return 最后使用时间（毫秒时间戳），未找到返回 null
+	 */
+	public Long getModelLastUsedTime(String modelId) {
+		return modelLastUsedTime.get(modelId);
+	}
+
+	/**
+	 * 检查并自动卸载空闲模型
+	 */
+	public void checkAndAutoUnload() {
+		try {
+			Map<String, LlamaCppProcess> loaded;
+			synchronized (this.processLock) {
+				loaded = new HashMap<>(this.loadedProcesses);
+			}
+			if (loaded.isEmpty()) return;
+
+			// 批量读取策略与超时，避免在循环中重复读取配置文件
+			Map<String, String> allPolicies = getAllAutoUnloadPolicies();
+			Map<String, Long> allTimeouts = getAllAutoUnloadTimeouts();
+
+			long now = System.currentTimeMillis();
+			for (Map.Entry<String, LlamaCppProcess> entry : loaded.entrySet()) {
+				String modelId = entry.getKey();
+				String mode = allPolicies.get(modelId);
+				if (!"allow".equalsIgnoreCase(mode)) continue;
+
+			Long timeoutMs = allTimeouts.get(modelId);
+			if (timeoutMs == null || timeoutMs <= 0) continue;
+
+			Long lastUsed = modelLastUsedTime.get(modelId);
+			if (lastUsed == null) continue;
+
+			long idleMs = now - lastUsed;
+			if (idleMs >= timeoutMs) {
+				if (ModelRequestTracker.getInstance().isModelBusy(modelId)) {
+					logger.info("[自动卸载] 模型正在处理请求，跳过卸载: model={}, activeCount={}", modelId, ModelRequestTracker.getInstance().getModelActiveCount(modelId));
+					continue;
+				}
+				logger.info("[自动卸载] 模型空闲超时: model={}, idleMs={}, timeoutMs={}", modelId, idleMs, timeoutMs);
+				boolean stopped = stopModel(modelId);
+				if (stopped) {
+					logger.info("[自动卸载] 卸载成功: model={}", modelId);
+				} else {
+					logger.warn("[自动卸载] 卸载失败: model={}", modelId);
+				}
+			}
+		}
+	} catch (Exception e) {
+			logger.warn("[自动卸载] 检查异常: {}", e.getMessage());
+		}
+	}
+
+	/**
+	 * 启动自动卸载调度器，每10秒检查一次
+	 */
+	public void startAutoUnloadScheduler() {
+		autoUnloadScheduler.scheduleAtFixedRate(() -> {
+			try {
+				checkAndAutoUnload();
+			} catch (Exception e) {
+				logger.warn("[自动卸载] 调度器异常: {}", e.getMessage());
+			}
+		}, 10, 10, TimeUnit.SECONDS);
+		logger.info("[自动卸载] 调度器已启动，检查间隔: 10秒");
 	}
 
 	/**
@@ -1537,6 +1733,7 @@ public class LlamaServerManager {
 					this.modelPorts.remove(id);
 				}
 				this.loadedModelInfos.remove(id);
+				this.modelLastUsedTime.remove(id);
 			}
 			return stopped;
 		}
@@ -1571,6 +1768,7 @@ public class LlamaServerManager {
 				this.loadingModels.remove(id);
 			}
 			this.loadedModelInfos.remove(id);
+			this.modelLastUsedTime.remove(id);
 		}
 		return stopped;
 	}
@@ -1784,6 +1982,7 @@ public class LlamaServerManager {
 						this.loadedProcesses.put(modelId, process);
 						this.modelPorts.put(modelId, actualPort);
 					}
+					this.modelLastUsedTime.put(modelId, System.currentTimeMillis());
 					LlamaServer.sendModelLoadEvent(modelId, true, "模型加载成功", actualPort);
 //					// 这里请求一次
 //					try {

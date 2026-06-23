@@ -99,17 +99,55 @@ public class AutoLoadPolicyController implements BaseController {
 				return;
 			}
 
+			AutoLoadPolicyManager manager = AutoLoadPolicyManager.getInstance();
+
+			// 处理自动加载策略
 			String mode = JsonUtil.getJsonString(obj, "mode");
-			if (mode == null || !("allow".equalsIgnoreCase(mode) || "deny".equalsIgnoreCase(mode))) {
-				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("mode 参数无效，必须为 allow 或 deny"));
-				return;
+			if (mode != null && !mode.isBlank()) {
+				if (!("allow".equalsIgnoreCase(mode) || "deny".equalsIgnoreCase(mode))) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("mode 参数无效，必须为 allow 或 deny"));
+					return;
+				}
+				String error = manager.setModelPolicy(modelId, mode);
+				if (error != null) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error));
+					return;
+				}
 			}
 
-			String error = AutoLoadPolicyManager.getInstance().setModelPolicy(modelId, mode);
-			if (error != null) {
-				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error));
-				return;
+			// 处理自动卸载策略
+			String autoUnload = JsonUtil.getJsonString(obj, "autoUnload");
+			if (autoUnload != null && !autoUnload.isBlank()) {
+				if (!("allow".equalsIgnoreCase(autoUnload) || "deny".equalsIgnoreCase(autoUnload))) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("autoUnload 参数无效，必须为 allow 或 deny"));
+					return;
+				}
+				String error = manager.setAutoUnloadPolicy(modelId, autoUnload);
+				if (error != null) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error));
+					return;
+				}
 			}
+
+			// 处理自动卸载超时时间
+			if (obj.has("autoUnloadTimeoutMs")) {
+				try {
+					long timeoutMs = obj.get("autoUnloadTimeoutMs").getAsLong();
+					if (timeoutMs <= 0) {
+						LlamaServer.sendJsonResponse(ctx, ApiResponse.error("autoUnloadTimeoutMs 必须为正数"));
+						return;
+					}
+					String error = manager.setAutoUnloadTimeoutMs(modelId, timeoutMs);
+					if (error != null) {
+						LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error));
+						return;
+					}
+				} catch (Exception e) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("autoUnloadTimeoutMs 格式无效"));
+					return;
+				}
+			}
+
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(null));
 		} catch (Exception e) {
 			logger.info("设置自动加载策略失败", e);
@@ -159,11 +197,26 @@ public class AutoLoadPolicyController implements BaseController {
 				return;
 			}
 
-			String error = AutoLoadPolicyManager.getInstance().resetModelPolicy(modelId);
+			AutoLoadPolicyManager manager = AutoLoadPolicyManager.getInstance();
+
+			String error = manager.resetModelPolicy(modelId);
 			if (error != null) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error));
 				return;
 			}
+
+			error = manager.resetAutoUnloadPolicy(modelId);
+			if (error != null) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error));
+				return;
+			}
+
+			error = manager.resetAutoUnloadTimeoutMs(modelId);
+			if (error != null) {
+				LlamaServer.sendJsonResponse(ctx, ApiResponse.error(error));
+				return;
+			}
+
 			LlamaServer.sendJsonResponse(ctx, ApiResponse.success(null));
 		} catch (Exception e) {
 			logger.info("重置自动加载策略失败", e);
