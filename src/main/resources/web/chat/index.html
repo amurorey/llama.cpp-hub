@@ -1816,20 +1816,47 @@
       textarea.style.height = textarea.scrollHeight + 'px';
     }
 
-    const EDIT_VIEWPORT_RESERVE = 96;
+    const EDIT_VIEWPORT_MARGIN = 8;
 
-    function getEditViewportHeight() {
-      if (window.visualViewport && typeof window.visualViewport.height === 'number') {
-        return window.visualViewport.height;
+    function getEditViewportBounds() {
+      const container = els.chatScroll;
+      const vvTop = (window.visualViewport && typeof window.visualViewport.offsetTop === 'number')
+        ? window.visualViewport.offsetTop
+        : 0;
+      const vvBottom = (window.visualViewport && typeof window.visualViewport.height === 'number')
+        ? window.visualViewport.height + vvTop
+        : (window.innerHeight || 0);
+      if (!container) {
+        return { top: vvTop, bottom: vvBottom, height: Math.max(0, vvBottom - vvTop) };
       }
-      return window.innerHeight || 0;
+      const cr = container.getBoundingClientRect();
+      const top = Math.max(cr.top, vvTop);
+      const bottom = Math.min(cr.bottom, vvBottom);
+      return { top, bottom, height: Math.max(0, bottom - top) };
+    }
+
+    function measureEditReserve(textarea) {
+      const editWrap = textarea.closest('.message-edit');
+      const bubble = textarea.closest('.message-bubble, .message, [data-message-bubble]') || editWrap;
+      let reserve = 16;
+      const editWrapRect = editWrap && editWrap.isConnected ? editWrap.getBoundingClientRect() : null;
+      if (editWrapRect) {
+        reserve += (editWrapRect.height - textarea.getBoundingClientRect().height);
+      }
+      if (bubble && bubble !== editWrap) {
+        const bubbleRect = bubble.getBoundingClientRect();
+        const editWrapRect2 = editWrapRect || editWrap.getBoundingClientRect();
+        reserve += Math.max(0, editWrapRect2.top - bubbleRect.top);
+      }
+      return reserve;
     }
 
     function fitEditInputToViewport(textarea) {
       if (!textarea || !textarea.isConnected) return;
-      const viewportHeight = getEditViewportHeight();
-      if (!viewportHeight) return;
-      const maxH = Math.max(80, viewportHeight - EDIT_VIEWPORT_RESERVE);
+      const bounds = getEditViewportBounds();
+      if (!bounds.height) return;
+      const reserve = measureEditReserve(textarea);
+      const maxH = Math.max(80, bounds.height - reserve - EDIT_VIEWPORT_MARGIN);
       textarea.style.maxHeight = maxH + 'px';
       const scrollH = textarea.scrollHeight;
       textarea.style.height = 'auto';
@@ -1840,19 +1867,19 @@
       if (!textarea || !textarea.isConnected) return;
       const container = els.chatScroll;
       if (!container) return;
-      const viewportHeight = getEditViewportHeight() || (window.innerHeight || 0);
-      const rect = textarea.getBoundingClientRect();
-      const bottom = rect.bottom;
-      const margin = 8;
-      const overflow = bottom - (viewportHeight - margin);
-      if (overflow > 0) {
-        container.scrollTop += overflow;
-      } else {
-        const top = rect.top;
-        const containerTop = container.getBoundingClientRect().top;
-        if (top < containerTop + margin) {
-          container.scrollTop -= (containerTop + margin - top);
+      const bounds = getEditViewportBounds();
+      if (!bounds.height) return;
+      const target = textarea.closest('.message-edit') || textarea;
+      const rect = target.getBoundingClientRect();
+      const overflowBottom = rect.bottom - (bounds.bottom - EDIT_VIEWPORT_MARGIN);
+      const overflowTop = (bounds.top + EDIT_VIEWPORT_MARGIN) - rect.top;
+      if (overflowBottom > 0) {
+        container.scrollTop += overflowBottom;
+        if (overflowTop > 0) {
+          container.scrollTop -= overflowTop;
         }
+      } else if (overflowTop > 0) {
+        container.scrollTop -= overflowTop;
       }
     }
 
