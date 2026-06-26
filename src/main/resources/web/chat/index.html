@@ -1232,6 +1232,19 @@
         const summary = document.createElement('button');
         summary.type = 'button';
         summary.className = 'html-preview-head';
+        summary.addEventListener('mousedown', function(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          console.log('[HTMLPreview] directClick on wrap-code head');
+          const parentBox = this.closest('.html-preview-box');
+          if (parentBox) {
+            toggleHtmlPreviewBox(parentBox);
+          }
+        });
+        summary.addEventListener('click', function(event) {
+          event.preventDefault();
+          event.stopPropagation();
+        });
 
         const meta = document.createElement('div');
         meta.className = 'html-preview-meta';
@@ -1275,6 +1288,19 @@
       const summary = document.createElement('button');
       summary.type = 'button';
       summary.className = 'html-preview-head';
+      summary.addEventListener('mousedown', function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('[HTMLPreview] directClick on streaming head');
+        const parentBox = this.closest('.html-preview-box');
+        if (parentBox) {
+          toggleHtmlPreviewBox(parentBox);
+        }
+      });
+      summary.addEventListener('click', function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+      });
 
       const meta = document.createElement('div');
       meta.className = 'html-preview-meta';
@@ -1345,6 +1371,19 @@
       const head = document.createElement('button');
       head.type = 'button';
       head.className = 'html-preview-head';
+      head.addEventListener('mousedown', function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('[HTMLPreview] directClick on html-code head');
+        const parentBox = this.closest('.html-preview-box');
+        if (parentBox) {
+          toggleHtmlPreviewBox(parentBox);
+        }
+      });
+      head.addEventListener('click', function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+      });
 
       const meta = document.createElement('div');
       meta.className = 'html-preview-meta';
@@ -1394,18 +1433,28 @@
       if (!blocks.length) {
         return false;
       }
-      const existingExpanded = Array.from(target.querySelectorAll('.html-preview-box')).map(isHtmlPreviewExpanded);
       const shouldCollapse = typeof collapsed === 'boolean' ? collapsed : true;
-      target.innerHTML = '';
+      const container = document.createDocumentFragment();
       let cursor = 0;
-      blocks.forEach((block, index) => {
-        appendRenderedMarkdownFragment(target, text.slice(cursor, block.start));
+      blocks.forEach((block) => {
+        const markdownText = text.slice(cursor, block.start);
+        if (markdownText) {
+          const template = document.createElement('template');
+          template.innerHTML = renderMarkdown(markdownText);
+          container.appendChild(template.content);
+        }
         const box = buildHtmlCodePreviewBox(block.content, shouldCollapse);
-        applyHtmlPreviewExpanded(box, existingExpanded[index] ?? !shouldCollapse);
-        target.appendChild(box);
+        container.appendChild(box);
         cursor = block.end;
       });
-      appendRenderedMarkdownFragment(target, text.slice(cursor));
+      const trailingText = text.slice(cursor);
+      if (trailingText) {
+        const template = document.createElement('template');
+        template.innerHTML = renderMarkdown(trailingText);
+        container.appendChild(template.content);
+      }
+      target.innerHTML = '';
+      target.appendChild(container);
       return true;
     }
 
@@ -1430,17 +1479,16 @@
       }
       const prefix = source.slice(0, unclosedFence.index);
       const htmlBlock = source.slice(unclosedFence.index);
-      const existingBox = target.querySelector('.html-preview-box');
-      const wasExpanded = existingBox ? isHtmlPreviewExpanded(existingBox) : !shouldCollapse;
-      target.innerHTML = '';
+      const container = document.createDocumentFragment();
       if (prefix) {
         const prefixDiv = document.createElement('div');
         prefixDiv.innerHTML = escapeHtml(prefix).replace(/\n/g, '<br>');
-        target.appendChild(prefixDiv);
+        container.appendChild(prefixDiv);
       }
       const box = buildStreamingHtmlPreviewBox(htmlBlock, shouldCollapse);
-      applyHtmlPreviewExpanded(box, wasExpanded);
-      target.appendChild(box);
+      container.appendChild(box);
+      target.innerHTML = '';
+      target.appendChild(container);
     }
 
     function isHtmlPreviewExpanded(box) {
@@ -1469,20 +1517,27 @@
     }
 
     function persistHtmlPreviewCollapsed(box) {
+      console.log('[HTMLPreview] persistCollapsed: called, box=', !!box);
       if (!box) {
+        console.log('[HTMLPreview] persistCollapsed: box is null, return');
         return;
       }
       const article = box.closest('article[data-index]');
-      if (!article) return;
+      console.log('[HTMLPreview] persistCollapsed: article=', !!article, 'data-index=', article?.dataset?.index);
+      if (!article) { console.log('[HTMLPreview] persistCollapsed: no article, return'); return; }
       const index = Number(article.dataset.index);
+      console.log('[HTMLPreview] persistCollapsed: index=', index);
       const conversation = getCurrentConversation();
       const message = conversation?.messages?.[index];
-      if (!message) return;
+      console.log('[HTMLPreview] persistCollapsed: message=', !!message, 'role=', message?.role);
+      if (!message) { console.log('[HTMLPreview] persistCollapsed: no message, return'); return; }
       const expanded = isHtmlPreviewExpanded(box);
+      console.log('[HTMLPreview] persistCollapsed: expanded=', expanded, 'setting htmlPreviewCollapsed=', !expanded);
       message.htmlPreviewCollapsed = !expanded;
       const response = getActiveAssistantResponse(message);
       if (response) {
         response.htmlPreviewCollapsed = !expanded;
+        console.log('[HTMLPreview] persistCollapsed: activeResponse updated');
       }
       requestAnimationFrame(() => {
         persistState({ delay: 50, immediate: false });
@@ -1491,9 +1546,12 @@
 
     function toggleHtmlPreviewBox(box) {
       if (!box) {
+        console.log('[HTMLPreview] toggleHtmlPreviewBox: box is null');
         return false;
       }
-      applyHtmlPreviewExpanded(box, !isHtmlPreviewExpanded(box));
+      const wasExpanded = isHtmlPreviewExpanded(box);
+      applyHtmlPreviewExpanded(box, !wasExpanded);
+      console.log('[HTMLPreview] toggleHtmlPreviewBox: wasExpanded=', wasExpanded, 'nowExpanded=', !wasExpanded);
       persistHtmlPreviewCollapsed(box);
       return true;
     }
@@ -1504,11 +1562,14 @@
       }
       const article = target.closest('article[data-index]');
       if (!article) {
+        console.log('[HTMLPreview] getCollapsed: no article found for target');
         return true;
       }
       const index = Number(article.dataset.index);
       const message = getCurrentConversation()?.messages?.[index];
-      return typeof message?.htmlPreviewCollapsed === 'boolean' ? message.htmlPreviewCollapsed : true;
+      const result = typeof message?.htmlPreviewCollapsed === 'boolean' ? message.htmlPreviewCollapsed : true;
+      console.log('[HTMLPreview] getCollapsed: index=', index, 'hasMessage=', !!message, 'htmlPreviewCollapsed=', message?.htmlPreviewCollapsed, 'result=', result);
+      return result;
     }
 
       function renderRichText(target, text, options = {}) {
@@ -1613,15 +1674,11 @@
       const text = state.pendingText;
 
       const collapsed = getHtmlPreviewCollapsedForTarget(target);
-      const existingBox = target.querySelector('.html-preview-box');
-      const wasExpanded = existingBox ? isHtmlPreviewExpanded(existingBox) : !collapsed;
-      console.log('[HTMLPreview] flushStreamingMarkdown: collapsed=', collapsed, 'existingBox.open=', existingBox ? isHtmlPreviewExpanded(existingBox) : undefined, 'existingBox=', !!existingBox, 'wasExpanded=', wasExpanded);
+      console.log('[HTMLPreview] flushStreamingMarkdown: collapsed=', collapsed);
 
-      if (renderMarkdownWithHtmlPreviews(target, text, collapsed)) {
-        const firstBox = target.querySelector('.html-preview-box');
-        if (firstBox) {
-          applyHtmlPreviewExpanded(firstBox, wasExpanded);
-        }
+      const isHoveringPreview = !!target.querySelector('.html-preview-box .html-preview-head:hover');
+
+      if (!isHoveringPreview && renderMarkdownWithHtmlPreviews(target, text, collapsed)) {
         state.renderedText = text;
         return;
       }
@@ -1639,14 +1696,33 @@
       if (unclosedFence) {
         const prefix = text.slice(0, unclosedFence.index);
         const htmlBlock = text.slice(unclosedFence.index);
-        target.innerHTML = renderMarkdown(normalizeMarkdownForStreaming(prefix));
-        const box = buildStreamingHtmlPreviewBox(htmlBlock, collapsed);
-        applyHtmlPreviewExpanded(box, wasExpanded);
-        target.appendChild(box);
+        const existingBox = target.querySelector('.html-preview-box');
+        const existingHead = existingBox?.querySelector(':scope > .html-preview-head');
+        if (existingBox && existingHead && existingHead.matches(':hover')) {
+          const body = existingBox.querySelector(':scope > .html-preview-body');
+          if (body) {
+            body.innerHTML = escapeHtml(htmlBlock).replace(/\n/g, '<br>');
+          }
+          const metaInfo = existingBox.querySelector('.html-preview-meta-info');
+          if (metaInfo) {
+            metaInfo.textContent = htmlBlock.split(/\r?\n/).length + ' ' + window.I18N.t('page.chat.main.message.lines', '行');
+          }
+        } else {
+          const prefixHtml = renderMarkdown(normalizeMarkdownForStreaming(prefix));
+          const box = buildStreamingHtmlPreviewBox(htmlBlock, collapsed);
+          const container = document.createDocumentFragment();
+          const template = document.createElement('template');
+          template.innerHTML = prefixHtml;
+          container.appendChild(template.content);
+          container.appendChild(box);
+          target.innerHTML = '';
+          target.appendChild(container);
+        }
+      } else if (isHoveringPreview) {
+        return;
       } else {
         target.innerHTML = renderMarkdown(text);
         wrapHtmlCodeBlocks(target, collapsed);
-        applyHtmlPreviewExpanded(target.querySelector('.html-preview-box'), wasExpanded);
       }
       state.renderedText = text;
     }
@@ -9123,10 +9199,13 @@ function confirmAudioRecording() {
       });
       els.messages.addEventListener('click', event => {
         const htmlPreviewBox = event.target.closest('.html-preview-box');
+        console.log('[HTMLPreview] click: target.tag=', event.target.tagName, 'target.class=', event.target.className, 'foundBox=', !!htmlPreviewBox);
         if (htmlPreviewBox) {
           const htmlPreviewHead = event.target.closest('.html-preview-head');
           const htmlPreviewBody = event.target.closest('.html-preview-body');
-          const shouldToggleHtmlPreview = !!htmlPreviewHead || (!isHtmlPreviewExpanded(htmlPreviewBox) && !htmlPreviewBody);
+          const isExpanded = isHtmlPreviewExpanded(htmlPreviewBox);
+          const shouldToggleHtmlPreview = !!htmlPreviewHead || (!isExpanded && !htmlPreviewBody);
+          console.log('[HTMLPreview] click: head=', !!htmlPreviewHead, 'body=', !!htmlPreviewBody, 'isExpanded=', isExpanded, 'shouldToggle=', shouldToggleHtmlPreview);
           if (shouldToggleHtmlPreview) {
             event.preventDefault();
             toggleHtmlPreviewBox(htmlPreviewBox);
