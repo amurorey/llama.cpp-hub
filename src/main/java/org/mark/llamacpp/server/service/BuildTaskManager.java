@@ -13,7 +13,10 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -254,6 +257,15 @@ public class BuildTaskManager {
                 String jdkHome = new File(javaHome, "..").getAbsolutePath();
                 String mvnBin = jdkHome + File.separator + "bin";
                 env.put("PATH", mvnBin + File.pathSeparator + existingPath);
+            }
+
+            Set<String> gpuDeps = detectGpuDeps(command);
+            if (!gpuDeps.isEmpty()) {
+                if (isWindows()) {
+                    applyWindowsRuntimePath(pb, env, gpuDeps);
+                } else {
+                    applyLinuxRuntimePath(env, gpuDeps);
+                }
             }
 
             Process process = pb.start();
@@ -500,6 +512,158 @@ public class BuildTaskManager {
         String osName = System.getProperty("os.name");
         String os = osName == null ? "" : osName.toLowerCase(java.util.Locale.ROOT);
         return os.contains("win");
+    }
+
+    private Set<String> detectGpuDeps(String command) {
+        Set<String> deps = new HashSet<>();
+        if (command == null) return deps;
+        String lower = command.toLowerCase(Locale.ROOT);
+        if (lower.contains("llama_cuda") || lower.contains("ggml_cuda") || lower.contains("cuda")) {
+            deps.add("CUDA");
+        }
+        if (lower.contains("hipblas") || lower.contains("rocm") || lower.contains("amd")) {
+            deps.add("ROCM");
+        }
+        if (lower.contains("vulkan") || lower.contains("ggml_vulkan")) {
+            deps.add("VULKAN");
+        }
+        return deps;
+    }
+
+    private void applyWindowsRuntimePath(ProcessBuilder pb, Map<String, String> env, Set<String> deps) {
+        List<String> paths = new ArrayList<>();
+        addExistingDir(paths, null);
+        addWindowsRocmDirs(paths, deps);
+        addWindowsCudartDirs(paths, deps);
+        prependPath(env, paths);
+    }
+
+    private void addWindowsRocmDirs(List<String> paths, Set<String> deps) {
+        if (!deps.contains("ROCM")) return;
+        File rocmRoot = new File("C:\\Program Files\\AMD\\ROCm");
+        File[] versions = rocmRoot.listFiles(File::isDirectory);
+        if (versions != null) {
+            java.util.Arrays.sort(versions, Comparator.comparing(File::getName).reversed());
+            for (File version : versions) {
+                addExistingDir(paths, new File(version, "bin").getAbsolutePath());
+                addExistingDir(paths, new File(version, "bin\\rocblas").getAbsolutePath());
+                addExistingDir(paths, new File(version, "bin\\hipblaslt").getAbsolutePath());
+            }
+        }
+        String[] fallbackRoots = {
+            "C:\\Program Files\\AMD\\AI_Bundle\\ROCm",
+            "C:\\Program Files\\AMD\\AI_Bundle"
+        };
+        for (String root : fallbackRoots) {
+            File dir = new File(root);
+            if (!dir.isDirectory()) continue;
+            addExistingDir(paths, new File(dir, "bin").getAbsolutePath());
+            addExistingDir(paths, new File(dir, "bin\\rocblas").getAbsolutePath());
+            addExistingDir(paths, new File(dir, "bin\\hipblaslt").getAbsolutePath());
+        }
+    }
+
+    private void addWindowsCudartDirs(List<String> paths, Set<String> deps) {
+        if (!deps.contains("CUDA")) return;
+        String root = LlamaServer.getDefaultLlamaCppPath();
+        Path rootPath = Paths.get(root);
+        if (!Files.exists(rootPath) || !Files.isDirectory(rootPath)) return;
+        try (java.util.stream.Stream<Path> entries = Files.list(rootPath)) {
+            for (Path subDir : entries.toList()) {
+                if (!Files.isDirectory(subDir)) continue;
+                if (!hasCudartDlls(subDir.toString())) continue;
+                addExistingDir(paths, subDir.toAbsolutePath().toString());
+            }
+        } catch (IOException e) {
+            logger.warn("扫描 cudart 目录失败: {}", e.getMessage());
+        }
+    }
+
+    private boolean hasCudartDlls(String dirPath) {
+        if (dirPath == null || dirPath.isBlank()) return false;
+        Path dir = Paths.get(dirPath);
+        if (!Files.isDirectory(dir)) return false;
+        try (java.util.stream.Stream<Path> entries = Files.list(dir)) {
+            boolean hasCublas = false, hasCublasLt = false, hasCudart = false;
+            for (Path entry : entries.toList()) {
+                if (!Files.isRegularFile(entry)) continue;
+                String name = entry.getFileName().toString().toLowerCase(Locale.ROOT);
+                if (name.startsWith("cublas64_") && name.endsWith(".dll")) hasCublas = true;
+                if (name.startsWith("cublaslt64_") && name.endsWith(".dll")) hasCublasLt = true;
+                if (name.startsWith("cudart64_") && name.endsWith(".dll")) hasCudart = true;
+            }
+            return hasCublas && hasCublasLt && hasCudart;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private void applyLinuxRuntimePath(Map<String, String> env, Set<String> deps) {
+        String existingLdPath = env.get("LD_LIBRARY_PATH");
+        StringBuilder ldPathBuilder = new StringBuilder();
+        if (deps.contains("ROCM")) {
+            String[] rocmPaths = {
+                "/opt/rocm-7.2.0/lib", "/opt/rocm-7.2.0/lib64",
+                "/opt/rocm/lib", "/opt/rocm/lib64",
+                "/usr/local/rocm/lib", "/usr/local/rocm/lib64",
+                "/usr/local/lib64", "/usr/local/lib"
+            };
+            for (String p : rocmPaths) {
+                if (ldPathBuilder.length() > 0) ldPathBuilder.append(":");
+                ldPathBuilder.append(p);
+            }
+        }
+        if (existingLdPath != null && !existingLdPath.isEmpty()) {
+            if (ldPathBuilder.length() > 0) ldPathBuilder.append(":");
+            ldPathBuilder.append(existingLdPath);
+        }
+        if (ldPathBuilder.length() > 0) {
+            env.put("LD_LIBRARY_PATH", ldPathBuilder.toString());
+        }
+    }
+
+    private void addExistingDir(List<String> paths, String path) {
+        if (path == null || path.isBlank()) return;
+        File dir = new File(path);
+        if (!dir.isDirectory()) return;
+        String abs = dir.getAbsolutePath();
+        for (String existing : paths) {
+            if (existing.equalsIgnoreCase(abs)) return;
+        }
+        paths.add(abs);
+    }
+
+    private void prependPath(Map<String, String> env, List<String> paths) {
+        if (paths == null || paths.isEmpty()) return;
+        String key = findEnvKey(env, "PATH");
+        String current = key == null ? "" : env.getOrDefault(key, "");
+        StringBuilder merged = new StringBuilder();
+        for (String path : paths) {
+            if (current != null && containsPathIgnoreCase(current, path)) continue;
+            if (merged.length() > 0) merged.append(File.pathSeparator);
+            merged.append(path);
+        }
+        if (current != null && !current.isBlank()) {
+            if (merged.length() > 0) merged.append(File.pathSeparator);
+            merged.append(current);
+        }
+        env.put(key == null ? "PATH" : key, merged.toString());
+    }
+
+    private String findEnvKey(Map<String, String> env, String key) {
+        for (String existing : env.keySet()) {
+            if (existing.equalsIgnoreCase(key)) return existing;
+        }
+        return null;
+    }
+
+    private boolean containsPathIgnoreCase(String pathList, String path) {
+        if (pathList == null || path == null) return false;
+        String sep = File.pathSeparator;
+        for (String entry : pathList.split(sep)) {
+            if (entry.trim().equalsIgnoreCase(path)) return true;
+        }
+        return false;
     }
 
     public static class BuildTask {
