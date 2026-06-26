@@ -241,6 +241,17 @@ public class EasyChatService {
 				}
 			}
 
+			// Parse continue headers
+			Long continueSeq = null;
+			String continueHeader = request.headers().get("X-Continue-Seq");
+			if (continueHeader != null && !continueHeader.isBlank()) {
+				try {
+					continueSeq = Long.parseLong(continueHeader);
+				} catch (NumberFormatException e) {
+					logger.warn("[EasyChat] 解析X-Continue-Seq失败: {}", continueHeader);
+				}
+			}
+
 			Map<Long, Integer> variants = null;
 			String variantsHeader = request.headers().get("X-Variants");
 			if (variantsHeader != null && !variantsHeader.isBlank()) {
@@ -260,8 +271,9 @@ public class EasyChatService {
 			}
 
 			boolean isRegenerate = regenerateSeq != null;
-			if (isRegenerate) {
-				// For regenerate: no body needed, backend reads user message from fragment
+			boolean isContinue = continueSeq != null;
+			if (isRegenerate || isContinue) {
+				// For regenerate/continue: no body needed, backend reads messages from fragments
 				// bodyBytes can be empty
 			} else if (bodyBytes != null && bodyBytes.length == 0) {
 				LlamaServer.sendJsonResponse(ctx, ApiResponse.error("请求体为空"));
@@ -279,6 +291,51 @@ public class EasyChatService {
 
 			Path convDir = isEphemeral ? null : storage.getConversationDir(conversationId);
 
+			// Validate continue target before acquiring seq lock.
+			int continueVariantIndex = 0;
+			if (isContinue) {
+				if (isEphemeral) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("临时会话不支持继续生成"));
+					return;
+				}
+				if (continueSeq < 0 || continueSeq % 2 != 1) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("X-Continue-Seq 必须指向 assistant 消息"));
+					return;
+				}
+				EasyChatStorage.FragmentHeader header = storage.readFragmentHeader(convDir, continueSeq);
+				if (header == null || storage.isDeleted(header)) {
+					LlamaServer.sendJsonResponse(ctx, ApiResponse.error("继续生成目标消息不存在或已删除"));
+					return;
+				}
+			continueVariantIndex = storage.resolveVariantIndex(header, variants != null ? variants.get(continueSeq) : null);
+			if (continueVariantIndex < 0) {
+				continueVariantIndex = header.activeVariantIndex;
+			}
+			if (continueVariantIndex < 0) {
+				continueVariantIndex = 0;
+			}
+			// Reject continue on a tool_calls-bearing message: llama.cpp's continuation
+			// path (common/chat-auto-parser-generator.cpp:53-70) only renders
+			// reasoning_content + render_content() and silently drops tool_calls from
+			// the prompt, which would lose the tool call data and mislead the model.
+			try {
+				byte[] continuePayload = storage.readPayload(convDir, continueSeq, continueVariantIndex);
+				if (continuePayload != null && continuePayload.length > 0) {
+					JsonObject existingMsg = JsonUtil.tryParseObject(new String(continuePayload, StandardCharsets.UTF_8));
+					if (existingMsg != null
+						&& existingMsg.has("tool_calls")
+						&& !existingMsg.get("tool_calls").isJsonNull()
+						&& existingMsg.get("tool_calls").isJsonArray()
+						&& existingMsg.getAsJsonArray("tool_calls").size() > 0) {
+						LlamaServer.sendJsonResponse(ctx, ApiResponse.error("暂不支持对带工具调用的消息继续生成"));
+						return;
+					}
+				}
+			} catch (Exception e) {
+				logger.warn("[EasyChat] 读取继续生成目标payload失败 seq={}", continueSeq, e);
+			}
+			}
+
 			long userSeq;
 			long aiSeq;
 			byte[] toolsBytes;
@@ -292,10 +349,18 @@ public class EasyChatService {
 					storage.ensureIndex(convDir, assistantName);
 					long idxSeq = storage.readIndexSeq(indexPath);
 
+					if (isRegenerate && isContinue) {
+						LlamaServer.sendJsonResponse(ctx, ApiResponse.error("不能同时指定 X-Regenerate-Id 和 X-Continue-Seq"));
+						return;
+					}
 					if (isRegenerate) {
 						// Regenerate: reuse existing AI seq, don't write user fragment
 						userSeq = -1;
 						aiSeq = regenerateSeq;
+					} else if (isContinue) {
+						// Continue: reuse existing AI seq, don't write user fragment
+						userSeq = -1;
+						aiSeq = continueSeq;
 					} else {
 						userSeq = idxSeq;
 						aiSeq = idxSeq + 1;
@@ -340,9 +405,12 @@ public class EasyChatService {
 			final byte[] finalToolsBytes = toolsBytes;
 			final JsonObject finalSamplingParams = samplingParams;
 			final boolean finalIsRegenerate = isRegenerate;
+			final boolean finalIsContinue = isContinue;
 			final boolean finalIsEphemeral = isEphemeral;
 			final Map<Long, Integer> finalVariants = variants;
 			final Long finalRegenerateSeq = regenerateSeq;
+			final Long finalContinueSeq = continueSeq;
+			final int finalContinueVariantIndex = continueVariantIndex;
 			final byte[] finalBodyBytes = bodyBytes;
 			// For persisted chats, the current message has already been written to fragments
 			// and will be replayed from history. Only ephemeral requests should append the
@@ -371,7 +439,17 @@ public class EasyChatService {
 			final EasyChatGlobalLock.Lease finalGlobalLease = globalLease;
 			worker.execute(() -> {
 				HttpURLConnection connection = null;
-				StreamAccumulator accumulator = new StreamAccumulator();
+			StreamAccumulator accumulator = new StreamAccumulator();
+			// Record seed lengths for every continue request so hasNewContent() can
+			// detect a no-op (model emits EOS immediately, nothing appended). For
+			// streaming, the seed text is also appended to the accumulator so that
+			// streaming deltas produce original+new; for non-stream, llama.cpp returns
+			// the FULL text (prefill + new tokens) in choices[0].message.content, so
+			// seeding the content would double-count the original — only lengths are
+			// recorded.
+			if (finalIsContinue && finalConvDir != null) {
+				seedAccumulatorFromFragment(accumulator, finalConvDir, finalContinueSeq, finalContinueVariantIndex, finalRequestStream);
+			}
 				Path indexPath = finalConvDir == null ? null : storage.indexFile(finalConvDir);
 				String trackerRequestId = null;
 				try {
@@ -389,13 +467,13 @@ public class EasyChatService {
 					if (finalIsRemoteNode) {
 						handleRemoteNodeRequest(ctx, conversationId, finalNodeId, finalModelId,
 							finalSystemPrompt, finalConvDir, finalToolsBytes, finalSamplingParams,
-							finalVariants, finalRegenerateSeq, finalTransientBodyBytes, finalIsEphemeral, finalRequestStream, accumulator);
+							finalVariants, finalRegenerateSeq, finalContinueSeq, finalTransientBodyBytes, finalIsEphemeral, finalRequestStream, accumulator);
 					} else {
 						connection = openTrackedConnection(ctx, finalModelId, finalModelPort);
 
                        // Stream request body to llama.cpp
                         writeRequestBody(connection, conversationId, finalModelId, finalSystemPrompt, finalConvDir,
-							finalToolsBytes, finalSamplingParams, finalVariants, finalRegenerateSeq,
+							finalToolsBytes, finalSamplingParams, finalVariants, finalRegenerateSeq, finalContinueSeq,
 							finalTransientBodyBytes, finalIsEphemeral, finalRequestStream);
 
 						int responseCode = connection.getResponseCode();
@@ -430,23 +508,28 @@ public class EasyChatService {
 					// Write AI fragment and update state (always, if buffer has content)
 					if (!finalIsEphemeral) {
 						synchronized (convLock) {
-							if (accumulator.hasContent()) {
+							if (finalIsContinue ? accumulator.hasNewContent() : accumulator.hasContent()) {
 								JsonObject aiMsg = buildAiMessage(accumulator);
 								byte[] aiBytes = JsonUtil.toJson(aiMsg).getBytes(StandardCharsets.UTF_8);
-								int newVariantIndex = computeNextVariantIndex(finalConvDir, aiSeq, finalIsRegenerate);
-								boolean wroteNewAssistantFragment = persistAssistantFragment(finalConvDir, aiSeq, aiBytes, finalIsRegenerate, indexPath);
-								recordModelForVariant(finalConvDir, aiSeq, newVariantIndex, finalModelId, conversationId);
-								if (!finalIsRegenerate) {
-									updateStateMessageCount(conversationId, 2);
-								} else if (wroteNewAssistantFragment) {
-									updateStateMessageCount(conversationId, 1);
+								if (finalIsContinue) {
+									storage.updateVariant(finalConvDir, aiSeq, finalContinueVariantIndex, aiBytes);
+									recordModelForVariant(finalConvDir, aiSeq, finalContinueVariantIndex, finalModelId, conversationId);
+								} else {
+									int newVariantIndex = computeNextVariantIndex(finalConvDir, aiSeq, finalIsRegenerate);
+									boolean wroteNewAssistantFragment = persistAssistantFragment(finalConvDir, aiSeq, aiBytes, finalIsRegenerate, indexPath);
+									recordModelForVariant(finalConvDir, aiSeq, newVariantIndex, finalModelId, conversationId);
+									if (!finalIsRegenerate) {
+										updateStateMessageCount(conversationId, 2);
+									} else if (wroteNewAssistantFragment) {
+										updateStateMessageCount(conversationId, 1);
+									}
 								}
 							}
 						}
 					}
 
 					// Record usage to LlamaRecordService
-					if (accumulator.timings != null) {
+					if (accumulator.timings != null && (!finalIsContinue || accumulator.hasNewContent())) {
 						try {
 							Timing timing = timingFromJson(accumulator.timings);
 							ActiveRequest activeReq = new ActiveRequest(conversationId, finalModelId, "chat/completions");
@@ -472,14 +555,19 @@ public class EasyChatService {
 					try {
 						if (!finalIsEphemeral) {
 							synchronized (convLock) {
-								if (accumulator.hasContent()) {
+								if (finalIsContinue ? accumulator.hasNewContent() : accumulator.hasContent()) {
 									JsonObject aiMsg = buildAiMessage(accumulator);
 									byte[] aiBytes = JsonUtil.toJson(aiMsg).getBytes(StandardCharsets.UTF_8);
-									int newVariantIndex = computeNextVariantIndex(finalConvDir, aiSeq, finalIsRegenerate);
-									boolean wroteNewAssistantFragment = persistAssistantFragment(finalConvDir, aiSeq, aiBytes, finalIsRegenerate, indexPath);
-									recordModelForVariant(finalConvDir, aiSeq, newVariantIndex, finalModelId, conversationId);
-									if (finalIsRegenerate && wroteNewAssistantFragment) {
-										updateStateMessageCount(conversationId, 1);
+									if (finalIsContinue) {
+										storage.updateVariant(finalConvDir, aiSeq, finalContinueVariantIndex, aiBytes);
+										recordModelForVariant(finalConvDir, aiSeq, finalContinueVariantIndex, finalModelId, conversationId);
+									} else {
+										int newVariantIndex = computeNextVariantIndex(finalConvDir, aiSeq, finalIsRegenerate);
+										boolean wroteNewAssistantFragment = persistAssistantFragment(finalConvDir, aiSeq, aiBytes, finalIsRegenerate, indexPath);
+										recordModelForVariant(finalConvDir, aiSeq, newVariantIndex, finalModelId, conversationId);
+										if (finalIsRegenerate && wroteNewAssistantFragment) {
+											updateStateMessageCount(conversationId, 1);
+										}
 									}
 								}
 							}
@@ -488,7 +576,7 @@ public class EasyChatService {
 						logger.warn("[EasyChat] 异常状态下写入AI碎片失败", ex);
 					}
 					// Record usage even on error if timings available
-					if (accumulator.timings != null) {
+					if (accumulator.timings != null && (!finalIsContinue || accumulator.hasNewContent())) {
 						try {
 							Timing timing = timingFromJson(accumulator.timings);
 							ActiveRequest activeReq = new ActiveRequest(conversationId, finalModelId, "chat/completions");
@@ -1121,7 +1209,7 @@ public class EasyChatService {
      */
     private void writeRequestBody(HttpURLConnection conn, String conversationId, String modelId, String systemPrompt, Path convDir,
             byte[] toolsBytes, JsonObject samplingParams, Map<Long, Integer> variants, Long regenerateSeq,
-            byte[] transientUserMessage, boolean skipHistory, boolean stream)
+            Long continueSeq, byte[] transientUserMessage, boolean skipHistory, boolean stream)
             throws IOException {
         OutputStream logStream = createRequestLogStream(conversationId, modelId);
         OutputStream primary = conn.getOutputStream();
@@ -1129,7 +1217,7 @@ public class EasyChatService {
         try {
             requestWriter.writeRequestBody(os,
                 new EasyChatRequestWriter.RequestSpec(modelId, systemPrompt, convDir, toolsBytes,
-                    samplingParams, false, variants, regenerateSeq, transientUserMessage, skipHistory, stream));
+                    samplingParams, false, variants, regenerateSeq, continueSeq, transientUserMessage, skipHistory, stream));
         } finally {
             if (logStream != null) {
                 logStream.close();
@@ -1257,9 +1345,26 @@ public class EasyChatService {
 		// Accumulated tool calls: index -> {id, type, function:{name, arguments}}
 		final Map<Integer, JsonObject> toolCalls = new HashMap<>();
 		JsonObject timings = null;
+		// Terminal finish_reason captured from the SSE stream / non-stream response.
+		// Persisted into the fragment so the frontend can tell naturally-completed
+		// responses ("stop") from user-aborted ones (null) and max_tokens-truncated
+		// ones ("length"), which controls whether "continue generation" is offered.
+		String finishReason = null;
+		// Length of pre-existing content/reasoning seeded for "continue final message".
+		// Used to distinguish "no new tokens generated" from "has content" so that a
+		// continue that produces nothing (model immediately emits EOS) does not trigger
+		// a fragment rewrite or usage recording.
+		int seedContentLength = 0;
+		int seedReasoningContentLength = 0;
 
 		boolean hasContent() {
 			return content.length() > 0 || reasoningContent.length() > 0 || !toolCalls.isEmpty();
+		}
+
+		boolean hasNewContent() {
+			return content.length() > seedContentLength
+				|| reasoningContent.length() > seedReasoningContentLength
+				|| !toolCalls.isEmpty();
 		}
 	}
 
@@ -1316,17 +1421,18 @@ public class EasyChatService {
 					if (changed) {
 						line = "data: " + JsonUtil.toJson(json);
 					}
-					String terminalFinishReason = readTerminalFinishReason(json);
-					if (terminalFinishReason != null) {
-						if (!writeSseLine(ctx, line)) {
-							return false;
-						}
-						return writeSseLine(ctx, "data: [DONE]");
+				String terminalFinishReason = readTerminalFinishReason(json);
+				if (terminalFinishReason != null) {
+					accumulator.finishReason = terminalFinishReason;
+					if (!writeSseLine(ctx, line)) {
+						return false;
 					}
+					return writeSseLine(ctx, "data: [DONE]");
 				}
+			}
 
-				if (!writeSseLine(ctx, line)) {
-					return false;
+			if (!writeSseLine(ctx, line)) {
+				return false;
 				}
 			}
 		}
@@ -1431,6 +1537,51 @@ public class EasyChatService {
 
 	/* ---- AI message building ---- */
 
+	/**
+	 * Pre-seed a stream accumulator with the existing content of a persisted assistant fragment.
+	 * Used for "continue final message" so that accumulated deltas are appended to the original text.
+	 *
+	 * @param appendContent when true (stream continue), the seed text is appended to the
+	 *                      accumulator so that streaming deltas produce original+new; when
+	 *                      false (non-stream continue), only the seed lengths are recorded
+	 *                      so hasNewContent() can still detect a no-op response.
+	 */
+	private void seedAccumulatorFromFragment(StreamAccumulator accumulator, Path convDir, long seq, int variantIndex, boolean appendContent) {
+		if (convDir == null || seq < 0) {
+			return;
+		}
+		try {
+			byte[] payload = storage.readPayload(convDir, seq, variantIndex);
+			if (payload == null || payload.length == 0) {
+				return;
+			}
+			JsonObject json = JsonUtil.tryParseObject(new String(payload, StandardCharsets.UTF_8));
+			if (json == null) {
+				return;
+			}
+			if (json.has("content") && !json.get("content").isJsonNull()) {
+				String content = json.get("content").getAsString();
+				if (content != null && !content.isEmpty()) {
+					if (appendContent) {
+						accumulator.content.append(content);
+					}
+					accumulator.seedContentLength += content.length();
+				}
+			}
+			if (json.has("reasoning_content") && !json.get("reasoning_content").isJsonNull()) {
+				String reasoning = json.get("reasoning_content").getAsString();
+				if (reasoning != null && !reasoning.isEmpty()) {
+					if (appendContent) {
+						accumulator.reasoningContent.append(reasoning);
+					}
+					accumulator.seedReasoningContentLength += reasoning.length();
+				}
+			}
+		} catch (Exception e) {
+			logger.warn("[EasyChat] 读取继续生成原始内容失败 seq={} variant={}", seq, variantIndex, e);
+		}
+	}
+
 	private JsonObject buildAiMessage(StreamAccumulator acc) {
 		JsonObject msg = new JsonObject();
 		msg.addProperty("role", "assistant");
@@ -1454,6 +1605,10 @@ public class EasyChatService {
 
 		if (acc.timings != null) {
 			msg.add("timings", acc.timings);
+		}
+
+		if (acc.finishReason != null && !acc.finishReason.isBlank()) {
+			msg.addProperty("finish_reason", acc.finishReason);
 		}
 
 		return msg;
@@ -1647,6 +1802,15 @@ public class EasyChatService {
 				choice = choices.get(0).getAsJsonObject();
 			}
 		}
+		if (choice != null && choice.has("finish_reason") && !choice.get("finish_reason").isJsonNull()) {
+			try {
+				String fr = choice.get("finish_reason").getAsString();
+				if (fr != null && !fr.isBlank()) {
+					accumulator.finishReason = fr.trim();
+				}
+			} catch (Exception ignore) {
+			}
+		}
 		JsonObject message = choice != null && choice.has("message") && choice.get("message").isJsonObject()
 			? choice.getAsJsonObject("message")
 			: null;
@@ -1730,7 +1894,7 @@ public class EasyChatService {
 	 */
 	private void handleRemoteNodeRequest(ChannelHandlerContext ctx, String conversationId, String nodeId,
 		String modelId, String systemPrompt, Path convDir, byte[] toolsBytes,
-		JsonObject samplingParams, Map<Long, Integer> variants, Long regenerateSeq,
+		JsonObject samplingParams, Map<Long, Integer> variants, Long regenerateSeq, Long continueSeq,
 		byte[] transientUserMessage, boolean skipHistory, boolean stream,
 		StreamAccumulator accumulator) throws Exception {
 
@@ -1746,7 +1910,7 @@ public class EasyChatService {
                 try {
                     requestWriter.writeRequestBody(os,
                         new EasyChatRequestWriter.RequestSpec(modelId, systemPrompt, convDir, toolsBytes,
-                            samplingParams, false, variants, regenerateSeq, transientUserMessage, skipHistory, stream));
+                            samplingParams, false, variants, regenerateSeq, continueSeq, transientUserMessage, skipHistory, stream));
                 } finally {
                     if (remoteLogStream != null) {
                         try {
@@ -1858,10 +2022,11 @@ public class EasyChatService {
 					if (changed) {
 						line = "data: " + JsonUtil.toJson(json);
 					}
-					String terminalFinishReason = readTerminalFinishReason(json);
-					if (terminalFinishReason != null) {
-						trace.terminalFinishReason = terminalFinishReason;
-						if (!writeSseLine(ctx, line)) {
+				String terminalFinishReason = readTerminalFinishReason(json);
+				if (terminalFinishReason != null) {
+					trace.terminalFinishReason = terminalFinishReason;
+					accumulator.finishReason = terminalFinishReason;
+					if (!writeSseLine(ctx, line)) {
 							trace.endReason = "write_failed_terminal_chunk";
 							return trace;
 						}

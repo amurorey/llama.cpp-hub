@@ -3387,7 +3387,12 @@
           ? response.htmlPreviewCollapsed
           : typeof fallback?.htmlPreviewCollapsed === 'boolean'
             ? fallback.htmlPreviewCollapsed
-            : true
+            : true,
+        finishReason: typeof response?.finishReason === 'string' && response.finishReason.trim()
+          ? response.finishReason.trim()
+          : typeof fallback?.finishReason === 'string' && fallback.finishReason.trim()
+            ? fallback.finishReason.trim()
+            : null
       };
     }
 
@@ -3441,7 +3446,8 @@
         time: activeResponse.time,
         reasoningCollapsed: activeResponse.reasoningCollapsed,
         htmlPreviewCollapsed: activeResponse.htmlPreviewCollapsed,
-        toolCalls: normalizeMcpToolCalls(activeResponse.toolCalls)
+        toolCalls: normalizeMcpToolCalls(activeResponse.toolCalls),
+        finishReason: activeResponse.finishReason ?? null
       };
     }
 
@@ -3485,6 +3491,7 @@
       message.reasoningCollapsed = normalized.reasoningCollapsed;
       message.htmlPreviewCollapsed = normalized.htmlPreviewCollapsed;
       message.toolCalls = normalized.toolCalls;
+      message.finishReason = normalized.finishReason ?? null;
       return message;
     }
 
@@ -5373,6 +5380,30 @@
             '<path d="M19 8a7 7 0 1 0 2 5"></path>',
             '<path d="M19 3v5h-5"></path>'
           ].join('')));
+          // "Continue generation" only on the last assistant message of the conversation.
+          // Backend (EasyChatService) requires continueSeq to be the trailing assistant
+          // fragment; rendering the button only there keeps UX aligned with that constraint.
+          // Additionally, hide the button when the response is known to be naturally
+          // finished (finish_reason="stop"/"tool_calls"): llama.cpp would just emit EOS
+          // again, and repeated attempts could eventually sample junk tokens that pollute
+          // the fragment. Truncated-by-length ("length") and user-aborted (null) responses
+          // remain continueable.
+          const conv = getCurrentConversation();
+          const convMsgs = conv && isConversationLoaded(conv) ? conv.messages : [];
+          let lastAssistantIdx = -1;
+          for (let i = convMsgs.length - 1; i >= 0; i -= 1) {
+            if (convMsgs[i] && convMsgs[i].role === 'assistant') {
+              lastAssistantIdx = i;
+              break;
+            }
+          }
+          const canContinueResponse = !message.finishReason || message.finishReason === 'length';
+          if (lastAssistantIdx === index && canContinueResponse) {
+            actions.appendChild(createMessageActionButton('continue', index, window.I18N.t('page.chat.main.action.continue', '继续生成'), [
+              '<line x1="5" y1="12" x2="19" y2="12"></line>',
+              '<polyline points="12 5 19 12 12 19"></polyline>'
+            ].join('')));
+          }
         } else if (message.role === 'user') {
           actions.appendChild(createMessageActionButton('regenerate', index, window.I18N.t('page.chat.main.action.regenerate', '重新生成'), [
             '<path d="M19 8a7 7 0 1 0 2 5"></path>',
@@ -6539,6 +6570,9 @@
       const conversationId = state.currentConversationId || '';
       const assistant = getCurrentAssistant();
       const isRegenerate = options?.regenerateSeq != null;
+      const isContinue = options?.continueSeq != null;
+      const continueSeedContent = isContinue && typeof options.seedContent === 'string' ? options.seedContent : '';
+      const continueSeedReasoning = isContinue && typeof options.seedReasoning === 'string' ? options.seedReasoning : '';
       let requestFailed = false;
       let nextAssistantIndex = Number.isInteger(options?.targetAssistantIndex) ? options.targetAssistantIndex : null;
       let requestModel = state.model;
@@ -6567,11 +6601,12 @@
 
           const streamHeaders = buildStreamChatHeaders(conversationId, assistant, {
             regenerateSeq: isRegenerate ? options.regenerateSeq : undefined,
+            continueSeq: isContinue ? options.continueSeq : undefined,
             variantsStr: variantPairs.length > 0 ? variantPairs.join(',') : undefined
           });
 
           let bodyStr;
-          if (isRegenerate) {
+          if (isRegenerate || isContinue) {
             bodyStr = null;
           } else if (conversation?.messages?.some(m => m.role === 'tool')) {
             const lastToolMsg = conversation?.messages?.findLast(m => m.role === 'tool') || {};
@@ -6626,7 +6661,10 @@
             if (Number.isInteger(currentAssistantIndex)) {
               setAssistantResponseStreaming(currentAssistantIndex, true);
             }
-            result = await consumeSse(response, currentAssistantIndex);
+            result = await consumeSse(response, currentAssistantIndex, {
+              seedContent: isContinue ? continueSeedContent : '',
+              seedReasoning: isContinue ? continueSeedReasoning : ''
+            });
             updateLastAssistantMessage(
               result.content || '',
               result.reasoning || '',
@@ -6692,6 +6730,27 @@
           }
           if (Number.isInteger(currentAssistantIndex)) {
             setAssistantResponseStreaming(currentAssistantIndex, false);
+          }
+          // Persist the terminal finish_reason onto the active response so the UI can
+          // decide whether "continue generation" should be offered (only when the
+          // prior turn was truncated by length, or not yet finished — e.g. user abort).
+          if (result.finishReason && Number.isInteger(currentAssistantIndex)) {
+            const conv = getCurrentConversation();
+            const finishMsg = conv?.messages?.[currentAssistantIndex];
+            if (finishMsg && finishMsg.role === 'assistant') {
+              syncAssistantMessageState(finishMsg);
+              const finishResp = getActiveAssistantResponse(finishMsg);
+              if (finishResp) {
+                finishResp.finishReason = result.finishReason;
+              }
+              finishMsg.finishReason = result.finishReason;
+              syncAssistantMessageState(finishMsg);
+              // Re-render so the continue button visibility (which depends on
+              // finishReason) is updated immediately; without this the button would
+              // stay visible until the next full renderMessages, causing the
+              // post-completion UI to differ from the post-refresh UI.
+              renderMessages();
+            }
           }
 
           if (Array.isArray(result.toolCalls) && result.toolCalls.length) {
@@ -6915,6 +6974,144 @@
         renderMessages();
         persistState();
       }
+    }
+
+    /**
+     * Continue generating an existing assistant message.
+     *
+     * Unlike regenerate (which starts a fresh completion and stores a new variant),
+     * continue reuses the existing active response and asks llama.cpp to keep
+     * generating from the end of the current assistant content
+     * (continue_final_message=true, add_generation_prompt=false).
+     *
+     * The backend persists the FULL text (original + appended) by overwriting the
+     * existing variant (storage.updateVariant). To keep the live UI in sync during
+     * streaming, the SSE consumer is seeded with the current content/reasoning so
+     * that updateLastAssistantMessage(original + newTokens, ...) replaces — not
+     * overwrites with only the new tokens.
+     */
+    async function continueMessage(index) {
+      if (state.isSending) {
+        return;
+      }
+      const conversation = getCurrentConversation();
+      const message = conversation?.messages?.[index];
+      if (!message || message.role !== 'assistant') {
+        return;
+      }
+      if (message.isStreaming) {
+        return;
+      }
+      // A response that naturally finished (finish_reason="stop"/"tool_calls") has
+      // nothing more to append; llama.cpp would immediately emit EOS again. Only
+      // length-truncated ("length") and user-aborted (null) responses may be continued.
+      if (message.finishReason && message.finishReason !== 'length') {
+        showToast('info', window.I18N.t('page.chat.main.status.continue_already_complete', '该回复已完成，无更多内容可续写'));
+        return;
+      }
+      const continueSeq = getMessageFragmentSeq(message);
+      if (continueSeq == null || continueSeq % 2 !== 1) {
+        showToast('info', window.I18N.t('page.chat.main.status.continue_no_fragment', '该消息无法继续生成'));
+        return;
+      }
+      // Backend (EasyChatService) rejects continue on tool_calls-bearing messages:
+      // llama.cpp's continuation path silently drops tool_calls from the prompt.
+      if (hasAssistantToolCalls(message)) {
+        showToast('info', window.I18N.t('page.chat.main.status.continue_tool_calls_unsupported', '带工具调用的消息不支持继续生成'));
+        return;
+      }
+      syncRuntimeStateFromCurrentAssistant();
+      if (!state.model) {
+        updateStatus('error', window.I18N.t('page.chat.main.status.no_model_selected', '请先选择模型'), window.I18N.t('page.chat.main.status.no_model_selected_short', '未选择模型'));
+        return;
+      }
+
+      syncAssistantMessageState(message);
+      const activeResponse = getActiveAssistantResponse(message);
+      if (!activeResponse) {
+        return;
+      }
+      // Capture seed for streaming accumulator and for rollback on failure / no-op.
+      const seedContent = typeof activeResponse.content === 'string' ? activeResponse.content : '';
+      const seedReasoning = typeof activeResponse.reasoning === 'string' ? activeResponse.reasoning : '';
+      const seedTimings = activeResponse.timings;
+      const seedPerformanceText = typeof activeResponse.performanceText === 'string' ? activeResponse.performanceText : '';
+
+      message.timings = null;
+      message.performanceText = '';
+      message.isStreaming = true;
+      syncAssistantMessageState(message);
+      conversation.updatedAt = Date.now();
+      renderConversationList();
+      // Incremental update of the streaming state instead of a full renderMessages():
+      // setAssistantResponseStreaming updates only the target article (or falls back
+      // to renderMessages only when the article is missing), avoiding a full list
+      // rebuild that causes the action buttons to flicker.
+      setAssistantResponseStreaming(index, true);
+
+      const success = await requestAssistantResponse({
+        targetAssistantIndex: index,
+        continueSeq,
+        seedContent,
+        seedReasoning
+      });
+
+      // Restore the message to its pre-continue state (content/reasoning/timings).
+      const rollbackToSeed = function (msg) {
+        if (!msg || msg.role !== 'assistant') {
+          return;
+        }
+        syncAssistantMessageState(msg);
+        const resp = getActiveAssistantResponse(msg);
+        if (resp) {
+          resp.content = seedContent;
+          resp.reasoning = seedReasoning;
+          resp.timings = seedTimings;
+          resp.performanceText = seedPerformanceText;
+        }
+        msg.isStreaming = false;
+        syncAssistantMessageState(msg);
+        renderMessages();
+        persistState();
+      };
+
+      if (!success) {
+        rollbackToSeed(conversation?.messages?.[index]);
+        return;
+      }
+
+      // When the prior response was already naturally finished, the model
+      // typically emits EOS right away and produces no new content. Detect this
+      // no-op case, roll back the message to its original state, and notify the
+      // user instead of leaving a meaningless edit (cleared timings, etc.).
+      const finalMessage = conversation?.messages?.[index];
+      if (finalMessage && finalMessage.role === 'assistant') {
+        syncAssistantMessageState(finalMessage);
+        const finalResponse = getActiveAssistantResponse(finalMessage);
+        const finalContent = typeof finalResponse?.content === 'string' ? finalResponse.content : '';
+        const finalReasoning = typeof finalResponse?.reasoning === 'string' ? finalResponse.reasoning : '';
+        const appendedContent = finalContent.length >= seedContent.length && finalContent.startsWith(seedContent)
+          ? finalContent.slice(seedContent.length)
+          : finalContent;
+        const appendedReasoning = finalReasoning.length >= seedReasoning.length && finalReasoning.startsWith(seedReasoning)
+          ? finalReasoning.slice(seedReasoning.length)
+          : finalReasoning;
+        if (!appendedContent.trim() && !appendedReasoning.trim()) {
+          // Model emitted EOS without producing any new content — mark this response
+          // as naturally finished so the continue button disappears and repeated
+          // attempts (which could eventually sample junk tokens) are prevented.
+          if (finalResponse) {
+            finalResponse.finishReason = 'stop';
+          }
+          finalMessage.finishReason = 'stop';
+          rollbackToSeed(finalMessage);
+          showToast('info', window.I18N.t('page.chat.main.status.continue_already_complete', '该回复已完成，无更多内容可续写'));
+          return;
+        }
+      }
+
+      // New content was appended — persist the updated message.
+      persistState();
     }
 
     async function deleteMessage(index) {
@@ -7168,6 +7365,9 @@
       }
       if (options.regenerateSeq != null) {
         headers['X-Regenerate-Id'] = String(options.regenerateSeq);
+      }
+      if (options.continueSeq != null) {
+        headers['X-Continue-Seq'] = String(options.continueSeq);
       }
       if (options.variantsStr) {
         headers['X-Variants'] = options.variantsStr;
@@ -7472,13 +7672,17 @@
         if (payload.timings && typeof payload.timings === 'object') {
           out.timings = payload.timings;
         }
+        if (typeof payload.finish_reason === 'string' && payload.finish_reason.trim()) {
+          out.finishReason = payload.finish_reason.trim();
+        }
         if (msg.variants.length > 1) {
           out.responses = msg.variants.map(v => {
             const p = v?.content || {};
             const resp = {
               content: typeof p.content === 'string' ? p.content : '',
               reasoning: p.reasoning_content || '',
-              timings: p.timings && typeof p.timings === 'object' ? p.timings : null
+              timings: p.timings && typeof p.timings === 'object' ? p.timings : null,
+              finishReason: typeof p.finish_reason === 'string' && p.finish_reason.trim() ? p.finish_reason.trim() : null
             };
             if (p.tool_calls && p.tool_calls.length) {
               resp.toolCalls = normalizeMcpToolCalls(p.tool_calls);
@@ -7775,8 +7979,12 @@
       let timings = null;
       let toolCalls = [];
       let lastContentArray = null;
+      let finishReason = null;
       const finalizeResult = function () {
         const result = { content: answer, reasoning, model, timings, toolCalls: finalizeMcpToolCalls(toolCalls) };
+        if (finishReason) {
+          result.finishReason = finishReason;
+        }
         if (Array.isArray(lastContentArray)) {
           const extracted = extractMediaFromContent(lastContentArray);
           result.images = extracted.images;
@@ -7833,6 +8041,9 @@
               : '';
         answer += chunkContent;
         reasoning += chunkReasoning;
+        if (choice?.finish_reason !== undefined && choice?.finish_reason !== null && choice.finish_reason) {
+          finishReason = String(choice.finish_reason);
+        }
         return null;
       };
 
@@ -7887,6 +8098,9 @@
           []
         )
       };
+      if (choice?.finish_reason !== undefined && choice?.finish_reason !== null && choice.finish_reason) {
+        result.finishReason = String(choice.finish_reason);
+      }
       if (Array.isArray(rawContent)) {
         const extracted = extractMediaFromContent(rawContent);
         result.images = extracted.images;
@@ -7901,14 +8115,23 @@
       const decoder = new TextDecoder('utf-8');
       const liveUpdate = options.liveUpdate !== false;
       let buffer = '';
-      let answer = '';
-      let reasoning = '';
+      // Seed accumulator with the existing assistant content for "continue generation".
+      // llama.cpp streaming deltas contain only newly generated tokens (the prefill is
+      // suppressed server-side via task_result_state seeding), so to keep the live UI
+      // showing original+appended (matching the persisted full text) we start the
+      // local accumulator from the original content/reasoning.
+      let answer = typeof options.seedContent === 'string' ? options.seedContent : '';
+      let reasoning = typeof options.seedReasoning === 'string' ? options.seedReasoning : '';
       let model = '';
       let timings = null;
       let toolCalls = [];
       let lastContentArray = null;
+      let finishReason = null;
       const finalizeResult = function () {
         const result = { content: answer, reasoning, model, timings, toolCalls: finalizeMcpToolCalls(toolCalls) };
+        if (finishReason) {
+          result.finishReason = finishReason;
+        }
         if (Array.isArray(lastContentArray)) {
           const extracted = extractMediaFromContent(lastContentArray);
           result.images = extracted.images;
@@ -7973,6 +8196,9 @@
         answer += chunkContent;
         reasoning += chunkReasoning;
         const isFinished = choice?.finish_reason !== undefined && choice?.finish_reason !== null;
+        if (isFinished && choice.finish_reason) {
+          finishReason = String(choice.finish_reason);
+        }
         if (liveUpdate) {
           updateLastAssistantMessage(answer, reasoning, model, timings, targetIndex, isFinished);
         }
@@ -9278,6 +9504,8 @@ function confirmAudioRecording() {
           switchAssistantResponse(index, 1);
         } else if (actionButton.dataset.messageAction === 'regenerate') {
           regenerateMessage(index);
+        } else if (actionButton.dataset.messageAction === 'continue') {
+          continueMessage(index);
         } else if (actionButton.dataset.messageAction === 'delete') {
           deleteMessage(index);
         }

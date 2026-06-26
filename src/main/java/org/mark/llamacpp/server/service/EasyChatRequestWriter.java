@@ -45,10 +45,15 @@ final class EasyChatRequestWriter {
 			wroteAnyMessage = true;
 		}
 
+		boolean isContinue = spec.continueSeq != null;
 		if (!spec.skipHistory && spec.conversationDir != null) {
 			long historyEndExclusive = storage.readNextSeq(spec.conversationDir);
 			if (spec.regenerateSeq != null) {
 				historyEndExclusive = Math.min(historyEndExclusive, spec.regenerateSeq.longValue());
+			}
+			if (isContinue) {
+				// Include the target assistant fragment as the last message.
+				historyEndExclusive = Math.min(historyEndExclusive, spec.continueSeq.longValue() + 1);
 			}
 			for (long seq = 0; seq < historyEndExclusive; seq++) {
 				EasyChatStorage.FragmentHeader header = storage.readFragmentHeader(spec.conversationDir, seq);
@@ -70,7 +75,7 @@ final class EasyChatRequestWriter {
 				wroteAnyMessage = true;
 			}
 		}
-		if (spec.transientUserMessage != null && spec.transientUserMessage.length > 0) {
+		if (!isContinue && spec.transientUserMessage != null && spec.transientUserMessage.length > 0) {
 			if (wroteAnyMessage) {
 				writeAscii(output, COMMA);
 			}
@@ -95,8 +100,16 @@ final class EasyChatRequestWriter {
 		JsonObject requestOptions = new JsonObject();
 		if (!spec.skipSamplingInjection && spec.samplingParams != null) {
 			for (String key : spec.samplingParams.keySet()) {
+				// For continue requests these fields are managed explicitly.
+				if (spec.continueSeq != null && ("continue_final_message".equals(key) || "add_generation_prompt".equals(key))) {
+					continue;
+				}
 				requestOptions.add(key, spec.samplingParams.get(key));
 			}
+		}
+		if (spec.continueSeq != null) {
+			requestOptions.addProperty("continue_final_message", true);
+			requestOptions.addProperty("add_generation_prompt", false);
 		}
 		Boolean clientEnableThinking = readClientEnableThinking(requestOptions);
 		ParamTool.handleOpenAIChatThinking(requestOptions);
@@ -244,13 +257,14 @@ final class EasyChatRequestWriter {
 		final boolean skipSamplingInjection;
 		final Map<Long, Integer> variants;
 		final Long regenerateSeq;
+		final Long continueSeq;
 		final byte[] transientUserMessage;
 		final boolean skipHistory;
 		final boolean stream;
 
 		RequestSpec(String modelId, String systemPrompt, Path conversationDir, byte[] toolsBytes,
 			JsonObject samplingParams, boolean skipSamplingInjection, Map<Long, Integer> variants, Long regenerateSeq,
-			byte[] transientUserMessage, boolean skipHistory, boolean stream) {
+			Long continueSeq, byte[] transientUserMessage, boolean skipHistory, boolean stream) {
 			this.modelId = modelId;
 			this.systemPrompt = systemPrompt;
 			this.conversationDir = conversationDir;
@@ -259,6 +273,7 @@ final class EasyChatRequestWriter {
 			this.skipSamplingInjection = skipSamplingInjection;
 			this.variants = variants;
 			this.regenerateSeq = regenerateSeq;
+			this.continueSeq = continueSeq;
 			this.transientUserMessage = transientUserMessage;
 			this.skipHistory = skipHistory;
 			this.stream = stream;
