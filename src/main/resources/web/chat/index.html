@@ -3152,7 +3152,7 @@
         : window.I18N.t('page.chat.main.misc.attachment_conversation', '附件对话');
     }
 
-    function getAssistantDisplayName(message, fallbackModel) {
+    function getAssistantModelName(message, fallbackModel) {
       const responseCount = message?.responses?.length || message?.variantModelNames?.length || 1;
       const activeIndex = Math.min(
         Math.max(Number.isInteger(message?.activeResponseIndex) ? message.activeResponseIndex : 0, 0),
@@ -3175,8 +3175,17 @@
         else if (typeof fallbackModel === 'string' && fallbackModel.trim()) raw = fallbackModel;
         else raw = state.model;
       }
-      const modelName = stripModelNodeSuffix(raw) || window.I18N.t('page.chat.main.message.model', '模型');
-      return modelName;
+      return stripModelNodeSuffix(raw) || window.I18N.t('page.chat.main.message.model', '模型');
+    }
+
+    function getAssistantDisplayName(message, fallbackModel) {
+      const assistant = getCurrentAssistant();
+      const assistantName = assistant ? getAssistantDisplayLabel(assistant) : '';
+      const modelName = getAssistantModelName(message, fallbackModel);
+      if (assistantName && modelName) {
+        return assistantName + ' · ' + modelName;
+      }
+      return assistantName || modelName || window.I18N.t('page.chat.main.message.model', '模型');
     }
 
     function syncAssistantVariantModelArrays(message) {
@@ -7765,6 +7774,7 @@
       }
       applySettingsInputsToState();
       const saved = await persistState({ immediate: true, showErrorToast: showSavedToast });
+      renderMessages();
       if (saved && showSavedToast) {
         showToast('success', window.I18N.t('page.chat.main.toast.saved', '助手设置已保存到服务端'));
       }
