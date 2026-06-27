@@ -174,20 +174,23 @@ public class StreamingForwarder {
 
     /**
      * 将 bodyBuffer 中的数据流式转发到目标输出流。
-     * 有 nodeId → 纯转发；无 nodeId → 注入采样参数后转发。
+     * 有 nodeId → 仅注入 timing 参数后转发；无 nodeId → 注入采样参数 + timing 参数后转发。
      */
     public void streamBody(OutputStream output, Boolean clientEnableThinking) throws IOException {
+        String timingInjection = "\"timings_per_token\":true,\"return_progress\":true";
         if (nodeId != null && !nodeId.isBlank()) {
-            long written = bodyBuffer.streamTo(output);
-            logger.info("[远程代理] nodeId={}, streamed={} bytes", nodeId, written);
+            // 远程节点同样默认开启 timing，确保每个 chunk 都携带性能数据
+            long injected = bodyBuffer.streamInjected(output, timingInjection);
+            logger.info("[远程代理] nodeId={}, injected={} bytes", nodeId, injected);
         } else {
             String injection = SamplingInjectionBuilder.buildInjectionString(modelName, clientEnableThinking);
             if (!injection.isEmpty()) {
-                long injected = bodyBuffer.streamInjected(output, injection);
-                logger.info("[注入] model={}, injected={} bytes: {}", modelName, injected, injection);
+                injection = injection + "," + timingInjection;
             } else {
-                bodyBuffer.streamTo(output);
+                injection = timingInjection;
             }
+            long injected = bodyBuffer.streamInjected(output, injection);
+            logger.info("[注入] model={}, injected={} bytes: {}", modelName, injected, injection);
         }
     }
 
