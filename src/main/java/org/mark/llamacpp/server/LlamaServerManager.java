@@ -1903,7 +1903,7 @@ public class LlamaServerManager {
 
 			process.setOutputHandler(line -> {
 				LlamaServer.sendConsoleLineEvent(modelId, line);
-				if (line.contains("srv  update_slots: all slots are idle")) {
+				if (line.contains("llama_server: model loaded") || line.contains("update_slots: all slots are idle")) {
 					if (latchResolved.compareAndSet(false, true)) {
 						loadSuccess.set(true);
 						latch.countDown();
