@@ -1557,6 +1557,7 @@
   "page.chat.main.status.continue_no_fragment": "该消息无法继续生成",
   "page.chat.main.status.continue_tool_calls_unsupported": "带工具调用的消息不支持继续生成",
   "page.chat.main.status.continue_already_complete": "该回复已完成，无更多内容可续写",
+  "page.chat.main.status.regenerate_tool_context_unsupported": "该回复依赖工具调用上下文，无法重新生成",
   "page.chat.main.status.audio_unsupported": "当前模型不支持音频",
   "page.chat.main.status.disconnected": "未连接",
   "page.chat.main.status.connecting": "正在加载模型列表…",

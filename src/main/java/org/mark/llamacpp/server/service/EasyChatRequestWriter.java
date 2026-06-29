@@ -71,7 +71,17 @@ final class EasyChatRequestWriter {
 				if (wroteAnyMessage) {
 					writeAscii(output, COMMA);
 				}
-				storage.streamVariant(spec.conversationDir, seq, resolvedVariant, output);
+				byte[] payloadBytes = storage.readPayload(spec.conversationDir, seq, resolvedVariant);
+				if (payloadBytes != null && payloadBytes.length > 0) {
+					JsonObject cleaned = JsonUtil.tryParseObject(new String(payloadBytes, StandardCharsets.UTF_8));
+					if (cleaned != null) {
+						cleaned.remove("timings");
+						cleaned.remove("finish_reason");
+						writeString(output, JsonUtil.toJson(cleaned));
+					} else {
+						output.write(payloadBytes);
+					}
+				}
 				wroteAnyMessage = true;
 			}
 		}

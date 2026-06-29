@@ -334,13 +334,58 @@ public class EasyChatService {
 			} catch (Exception e) {
 				logger.warn("[EasyChat] 读取继续生成目标payload失败 seq={}", continueSeq, e);
 			}
+		}
+
+		// Reject regenerate of a tool-call-following assistant: llama.cpp emits EOS
+		// immediately when regenerating the final reply after a tool result, producing
+		// an empty response. Regenerate of the tool_calls-bearing assistant itself
+		// remains allowed (the user may want different tool calls).
+		if (isRegenerate && !isEphemeral && convDir != null) {
+			try {
+				boolean targetHasToolCalls = false;
+				EasyChatStorage.FragmentHeader regFragHeader = storage.readFragmentHeader(convDir, regenerateSeq);
+				if (regFragHeader != null && !storage.isDeleted(regFragHeader)) {
+					int regVariant = storage.resolveVariantIndex(regFragHeader,
+						variants != null ? variants.get(regenerateSeq) : null);
+					if (regVariant < 0) { regVariant = regFragHeader.activeVariantIndex; }
+					if (regVariant < 0) { regVariant = 0; }
+					byte[] regPayload = storage.readPayload(convDir, regenerateSeq, regVariant);
+					if (regPayload != null && regPayload.length > 0) {
+						JsonObject regMsg = JsonUtil.tryParseObject(new String(regPayload, StandardCharsets.UTF_8));
+						if (regMsg != null && regMsg.has("tool_calls")
+							&& !regMsg.get("tool_calls").isJsonNull()
+							&& regMsg.get("tool_calls").isJsonArray()
+							&& regMsg.getAsJsonArray("tool_calls").size() > 0) {
+							targetHasToolCalls = true;
+						}
+					}
+				}
+				if (!targetHasToolCalls) {
+					for (long seq = 0; seq < regenerateSeq; seq++) {
+						EasyChatStorage.FragmentHeader h = storage.readFragmentHeader(convDir, seq);
+						if (h == null || storage.isDeleted(h)) { continue; }
+						int v = storage.resolveVariantIndex(h, variants != null ? variants.get(seq) : null);
+						if (v < 0) { v = h.activeVariantIndex; }
+						if (v < 0) { v = 0; }
+						byte[] p = storage.readPayload(convDir, seq, v);
+						if (p == null || p.length == 0) { continue; }
+						JsonObject m = JsonUtil.tryParseObject(new String(p, StandardCharsets.UTF_8));
+						if (m != null && "tool".equals(JsonUtil.getJsonString(m, "role", ""))) {
+							LlamaServer.sendJsonResponse(ctx, ApiResponse.error("该回复依赖工具调用上下文，无法重新生成"));
+							return;
+						}
+					}
+				}
+			} catch (Exception e) {
+				logger.warn("[EasyChat] regenerate预检失败 seq={}", regenerateSeq, e);
 			}
+		}
 
-			long userSeq;
-			long aiSeq;
-			byte[] toolsBytes;
+		long userSeq;
+		long aiSeq;
+		byte[] toolsBytes;
 
-			synchronized (convLock) {
+		synchronized (convLock) {
 				if (isEphemeral) {
 					userSeq = -1;
 					aiSeq = -1;

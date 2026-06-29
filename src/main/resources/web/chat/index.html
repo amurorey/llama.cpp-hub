@@ -6871,8 +6871,8 @@
       updateMessageActionStates();
       const conversationId = state.currentConversationId || '';
       const assistant = getCurrentAssistant();
-      const isRegenerate = options?.regenerateSeq != null;
-      const isContinue = options?.continueSeq != null;
+      let isRegenerate = options?.regenerateSeq != null;
+      let isContinue = options?.continueSeq != null;
       const continueSeedContent = isContinue && typeof options.seedContent === 'string' ? options.seedContent : '';
       const continueSeedReasoning = isContinue && typeof options.seedReasoning === 'string' ? options.seedReasoning : '';
       let requestFailed = false;
@@ -6910,22 +6910,24 @@
           let bodyStr;
           if (isRegenerate || isContinue) {
             bodyStr = null;
-          } else if (conversation?.messages?.some(m => m.role === 'tool')) {
-            const lastToolMsg = conversation?.messages?.findLast(m => m.role === 'tool') || {};
-            bodyStr = JSON.stringify({
-              role: 'tool',
-              content: typeof lastToolMsg.content === 'string' ? lastToolMsg.content : '',
-              tool_call_id: lastToolMsg.toolCallId || '',
-              name: lastToolMsg.toolName || ''
-            });
           } else {
-            const lastUserMsg = conversation?.messages?.findLast(m => m.role === 'user') || {};
-            const userText = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '';
-            const userImages = getMessageImages(lastUserMsg);
-            const userFiles = getMessageTextFiles(lastUserMsg);
-            const userAudios = getMessageAudioFiles(lastUserMsg);
-            const userVideos = getMessageVideoFiles(lastUserMsg);
-            bodyStr = buildStreamUserMessage(userText, userImages, userFiles, userAudios, userVideos);
+            const lastMsg = conversation?.messages?.[conversation.messages.length - 1];
+            if (lastMsg?.role === 'tool') {
+              bodyStr = JSON.stringify({
+                role: 'tool',
+                content: typeof lastMsg.content === 'string' ? lastMsg.content : '',
+                tool_call_id: lastMsg.toolCallId || '',
+                name: lastMsg.toolName || ''
+              });
+            } else {
+              const lastUserMsg = conversation?.messages?.findLast(m => m.role === 'user') || {};
+              const userText = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '';
+              const userImages = getMessageImages(lastUserMsg);
+              const userFiles = getMessageTextFiles(lastUserMsg);
+              const userAudios = getMessageAudioFiles(lastUserMsg);
+              const userVideos = getMessageVideoFiles(lastUserMsg);
+              bodyStr = buildStreamUserMessage(userText, userImages, userFiles, userAudios, userVideos);
+            }
           }
 
           const response = await fetch(STREAM_CHAT_ENDPOINT, {
@@ -6954,7 +6956,7 @@
               if (Number.isInteger(currentAssistantIndex)) {
                 const aiMsg = conv?.messages?.[currentAssistantIndex];
                 if (aiMsg && aiMsg.fragmentSeq == null) {
-                  const lastUser = conv?.messages?.findLast(m => m.role === 'user');
+                  const lastUser = conv?.messages?.findLast(m => m.role === 'user' || m.role === 'tool');
                   const lastUserSeq = getMessageFragmentSeq(lastUser);
                   aiMsg.fragmentSeq = lastUserSeq != null ? lastUserSeq + 1 : (conv?.nextFragmentSeq != null ? conv.nextFragmentSeq - 1 : null);
                 }
@@ -6999,7 +7001,7 @@
               if (Number.isInteger(currentAssistantIndex)) {
                 const aiMsg = conv?.messages?.[currentAssistantIndex];
                 if (aiMsg && aiMsg.fragmentSeq == null) {
-                  const lastUser = conv?.messages?.findLast(m => m.role === 'user');
+                  const lastUser = conv?.messages?.findLast(m => m.role === 'user' || m.role === 'tool');
                   const lastUserSeq = getMessageFragmentSeq(lastUser);
                   aiMsg.fragmentSeq = lastUserSeq != null ? lastUserSeq + 1 : (conv?.nextFragmentSeq != null ? conv.nextFragmentSeq - 1 : null);
                 }
@@ -7066,9 +7068,21 @@
             const toolMessages = await mcpModule.executeToolCalls(result.toolCalls, enabledTools, {
               preparedQuery: ''
             });
+            const toolConv = getCurrentConversation();
+            const toolFragmentSeq = toolConv?.nextFragmentSeq;
             for (const toolMessage of toolMessages) {
-              pushMessage('tool', toolMessage.content || '', toolMessage, { incremental: true, persist: false });
+              pushMessage('tool', toolMessage.content || '', toolMessage, { incremental: true, persist: false, fragmentSeq: toolFragmentSeq });
             }
+            if (toolConv && toolConv.nextFragmentSeq != null) {
+              toolConv.nextFragmentSeq += 2;
+            }
+            // Subsequent tool rounds must be normal requests so the tool result
+            // is sent as the request body and the backend allocates new fragments.
+            // Keeping isRegenerate/isContinue true would send bodyStr=null and reuse
+            // the regenerate/continue target seq, so the model never sees the tool
+            // result and loops indefinitely on tool_calls.
+            isRegenerate = false;
+            isContinue = false;
             nextAssistantIndex = null;
             currentAssistantIndex = null;
             remainingToolRounds -= 1;
@@ -7167,6 +7181,17 @@
         if (userMessageIndex === index || !conversation.messages[userMessageIndex] || conversation.messages[userMessageIndex].role !== 'user') {
           showToast('info', window.I18N.t('page.chat.main.status.no_user_message', '未找到对应的用户消息'));
           return;
+        }
+        // Reject regenerate of a tool-call-following assistant: llama.cpp emits EOS
+        // immediately when regenerating the final reply after a tool result. Mirrors
+        // the backend precheck in EasyChatService. Regenerate of the tool_calls-bearing
+        // assistant itself remains allowed.
+        if (!hasAssistantToolCalls(message)) {
+          const hasPriorTool = conversation.messages.slice(0, index).some(m => m.role === 'tool');
+          if (hasPriorTool) {
+            showToast('info', window.I18N.t('page.chat.main.status.regenerate_tool_context_unsupported', '该回复依赖工具调用上下文，无法重新生成'));
+            return;
+          }
         }
       } else if (message.role !== 'user') {
         return;
@@ -7303,7 +7328,30 @@
         }
       }
       if (!success) {
-        renderMessages();
+        if (createdNewAssistant) {
+          const article = els.messages.querySelector(`article[data-index="${assistantMessageIndex}"]`);
+          if (article) { article.remove(); }
+          if (!conversation.messages.length) {
+            els.emptyState.classList.remove('hidden');
+          }
+        } else {
+          const article = els.messages.querySelector(`article[data-index="${assistantMessageIndex}"]`);
+          if (article) {
+            const assistantMessage = conversation.messages[assistantMessageIndex];
+            if (assistantMessage && !updateAssistantMessageElement(article, assistantMessage, assistantMessageIndex)) {
+              article.replaceWith(createMessageElement(assistantMessage, assistantMessageIndex));
+            }
+          }
+        }
+        if (truncatedMessages && truncatedMessages.length > 0) {
+          for (let i = 0; i < truncatedMessages.length; i++) {
+            const msg = truncatedMessages[i];
+            els.messages.appendChild(createMessageElement(msg, truncateEndIndex + i));
+          }
+        }
+        syncConversationMeta();
+        updateMessageActionStates();
+        renderMessageRail();
         persistState();
       } else if (truncatedMessages && truncatedMessages.length > 0) {
         // Append restored messages incrementally instead of full rebuild

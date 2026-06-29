@@ -1556,6 +1556,7 @@
   "page.chat.main.status.continue_no_fragment": "This message cannot be continued",
   "page.chat.main.status.continue_tool_calls_unsupported": "Cannot continue a message with tool calls",
   "page.chat.main.status.continue_already_complete": "This response is already complete; nothing more to continue",
+  "page.chat.main.status.regenerate_tool_context_unsupported": "This response depends on tool-call context and cannot be regenerated",
   "page.chat.main.status.audio_unsupported": "Current model does not support audio",
   "page.chat.main.status.disconnected": "Disconnected",
   "page.chat.main.status.connecting": "Loading model list...",
