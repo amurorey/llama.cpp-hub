@@ -1246,11 +1246,9 @@
 
     function wrapHtmlCodeBlocks(target, collapsed) {
       if (!target) {
-        console.log('[HTMLPreview] wrapHtmlCodeBlocks: no target');
         return;
       }
       const shouldCollapse = typeof collapsed === 'boolean' ? collapsed : true;
-      console.log('[HTMLPreview] wrapHtmlCodeBlocks: running, collapsed=', shouldCollapse);
       const pres = target.querySelectorAll('pre');
       let wrappedCount = 0;
       for (const pre of pres) {
@@ -1276,7 +1274,6 @@
         summary.addEventListener('mousedown', function(event) {
           event.preventDefault();
           event.stopPropagation();
-          console.log('[HTMLPreview] directClick on wrap-code head');
           const parentBox = this.closest('.html-preview-box');
           if (parentBox) {
             toggleHtmlPreviewBox(parentBox);
@@ -1316,12 +1313,10 @@
 
         wrappedCount += 1;
       }
-      console.log('[HTMLPreview] wrapHtmlCodeBlocks: wrapped', wrappedCount, 'blocks');
     }
 
     function buildStreamingHtmlPreviewBox(htmlBlock, collapsed) {
       const shouldCollapse = typeof collapsed === 'boolean' ? collapsed : true;
-      console.log('[HTMLPreview] buildStreamingHtmlPreviewBox:', htmlBlock.slice(0, 40).replace(/\n/g, '\\n'), 'collapsed=', shouldCollapse);
       const lineCount = htmlBlock.split(/\r?\n/).length;
       const box = document.createElement('div');
       box.className = 'html-preview-box';
@@ -1332,7 +1327,6 @@
       summary.addEventListener('mousedown', function(event) {
         event.preventDefault();
         event.stopPropagation();
-        console.log('[HTMLPreview] directClick on streaming head');
         const parentBox = this.closest('.html-preview-box');
         if (parentBox) {
           toggleHtmlPreviewBox(parentBox);
@@ -1415,7 +1409,6 @@
       head.addEventListener('mousedown', function(event) {
         event.preventDefault();
         event.stopPropagation();
-        console.log('[HTMLPreview] directClick on html-code head');
         const parentBox = this.closest('.html-preview-box');
         if (parentBox) {
           toggleHtmlPreviewBox(parentBox);
@@ -1501,11 +1494,9 @@
 
     function wrapStreamingHtmlCodeBlocksInPlainText(target, source, collapsed) {
       if (!target || !source) {
-        console.log('[HTMLPreview] wrapStreamingHtmlCodeBlocksInPlainText: no target/source');
         return;
       }
       const shouldCollapse = typeof collapsed === 'boolean' ? collapsed : true;
-      console.log('[HTMLPreview] wrapStreamingHtmlCodeBlocksInPlainText: source length', source.length, 'collapsed=', shouldCollapse);
       const htmlFences = Array.from(source.matchAll(/(^|\n)```\s*(html|HTML|Html)\b/g));
       let unclosedFence = null;
       if (htmlFences.length) {
@@ -1558,27 +1549,20 @@
     }
 
     function persistHtmlPreviewCollapsed(box) {
-      console.log('[HTMLPreview] persistCollapsed: called, box=', !!box);
       if (!box) {
-        console.log('[HTMLPreview] persistCollapsed: box is null, return');
         return;
       }
       const article = box.closest('article[data-index]');
-      console.log('[HTMLPreview] persistCollapsed: article=', !!article, 'data-index=', article?.dataset?.index);
-      if (!article) { console.log('[HTMLPreview] persistCollapsed: no article, return'); return; }
+      if (!article) { return; }
       const index = Number(article.dataset.index);
-      console.log('[HTMLPreview] persistCollapsed: index=', index);
       const conversation = getCurrentConversation();
       const message = conversation?.messages?.[index];
-      console.log('[HTMLPreview] persistCollapsed: message=', !!message, 'role=', message?.role);
-      if (!message) { console.log('[HTMLPreview] persistCollapsed: no message, return'); return; }
+      if (!message) { return; }
       const expanded = isHtmlPreviewExpanded(box);
-      console.log('[HTMLPreview] persistCollapsed: expanded=', expanded, 'setting htmlPreviewCollapsed=', !expanded);
       message.htmlPreviewCollapsed = !expanded;
       const response = getActiveAssistantResponse(message);
       if (response) {
         response.htmlPreviewCollapsed = !expanded;
-        console.log('[HTMLPreview] persistCollapsed: activeResponse updated');
       }
       requestAnimationFrame(() => {
         persistState({ delay: 50, immediate: false });
@@ -1587,12 +1571,10 @@
 
     function toggleHtmlPreviewBox(box) {
       if (!box) {
-        console.log('[HTMLPreview] toggleHtmlPreviewBox: box is null');
         return false;
       }
       const wasExpanded = isHtmlPreviewExpanded(box);
       applyHtmlPreviewExpanded(box, !wasExpanded);
-      console.log('[HTMLPreview] toggleHtmlPreviewBox: wasExpanded=', wasExpanded, 'nowExpanded=', !wasExpanded);
       persistHtmlPreviewCollapsed(box);
       return true;
     }
@@ -1603,13 +1585,11 @@
       }
       const article = target.closest('article[data-index]');
       if (!article) {
-        console.log('[HTMLPreview] getCollapsed: no article found for target');
         return true;
       }
       const index = Number(article.dataset.index);
       const message = getCurrentConversation()?.messages?.[index];
       const result = typeof message?.htmlPreviewCollapsed === 'boolean' ? message.htmlPreviewCollapsed : true;
-      console.log('[HTMLPreview] getCollapsed: index=', index, 'hasMessage=', !!message, 'htmlPreviewCollapsed=', message?.htmlPreviewCollapsed, 'result=', result);
       return result;
     }
 
@@ -1620,7 +1600,6 @@
         const source = String(text ?? '');
         const isStreaming = !!options.isStreaming;
         const htmlPreviewCollapsed = typeof options.htmlPreviewCollapsed === 'boolean' ? options.htmlPreviewCollapsed : true;
-        console.log('[HTMLPreview] renderRichText: isStreaming=', isStreaming, 'hasHtmlFence=', /(^|\n)```\s*(html|HTML|Html)\b/.test(source), 'collapsed=', htmlPreviewCollapsed);
        if (isStreaming) {
           if (!renderMarkdownWithHtmlPreviews(target, source, htmlPreviewCollapsed)) {
             target.innerHTML = escapeHtml(source).replace(/\n/g, '<br>');
@@ -1716,7 +1695,6 @@
       const wasNearBottom = isChatNearBottom();
 
       const collapsed = getHtmlPreviewCollapsedForTarget(target);
-      console.log('[HTMLPreview] flushStreamingMarkdown: collapsed=', collapsed);
 
       const isHoveringPreview = !!target.querySelector('.html-preview-box .html-preview-head:hover');
 
@@ -1734,7 +1712,6 @@
           unclosedFence = lastFence;
         }
       }
-      console.log('[HTMLPreview] flushStreamingMarkdown: unclosedFence=', !!unclosedFence);
       if (unclosedFence) {
         const prefix = text.slice(0, unclosedFence.index);
         const htmlBlock = text.slice(unclosedFence.index);
@@ -9915,13 +9892,11 @@ function confirmAudioRecording() {
       });
       els.messages.addEventListener('click', event => {
         const htmlPreviewBox = event.target.closest('.html-preview-box');
-        console.log('[HTMLPreview] click: target.tag=', event.target.tagName, 'target.class=', event.target.className, 'foundBox=', !!htmlPreviewBox);
         if (htmlPreviewBox) {
           const htmlPreviewHead = event.target.closest('.html-preview-head');
           const htmlPreviewBody = event.target.closest('.html-preview-body');
           const isExpanded = isHtmlPreviewExpanded(htmlPreviewBox);
           const shouldToggleHtmlPreview = !!htmlPreviewHead || (!isExpanded && !htmlPreviewBody);
-          console.log('[HTMLPreview] click: head=', !!htmlPreviewHead, 'body=', !!htmlPreviewBody, 'isExpanded=', isExpanded, 'shouldToggle=', shouldToggleHtmlPreview);
           if (shouldToggleHtmlPreview) {
             event.preventDefault();
             toggleHtmlPreviewBox(htmlPreviewBox);
