@@ -391,6 +391,8 @@
             if (header) header.checked = !!log.logRequestHeader;
             const body = byId('toggleLogRequestBody');
             if (body) body.checked = !!log.logRequestBody;
+            const bodyFile = byId('toggleLogRequestBodyToFile');
+            if (bodyFile) bodyFile.checked = !!log.logRequestBodyToFile;
         }
 
         // Download
@@ -759,10 +761,12 @@
         const url = byId('toggleLogRequestUrl');
         const header = byId('toggleLogRequestHeader');
         const body = byId('toggleLogRequestBody');
+        const bodyFile = byId('toggleLogRequestBodyToFile');
         const payload = {};
         if (url) payload.logRequestUrl = url.checked;
         if (header) payload.logRequestHeader = header.checked;
         if (body) payload.logRequestBody = body.checked;
+        if (bodyFile) payload.logRequestBodyToFile = bodyFile.checked;
         try {
             const resp = await fetch('/api/sys/setting', {
                 method: 'POST',

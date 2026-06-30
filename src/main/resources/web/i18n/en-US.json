@@ -773,6 +773,7 @@
   "page.settings.logging.url": "Request URL",
   "page.settings.logging.header": "Request Header",
   "page.settings.logging.body": "Request Body",
+  "page.settings.logging.body_file": "Write Request Body to File",
   "page.settings.download.title": "Download Directory",
   "page.settings.download.desc": "Default save directory for download tasks",
   "page.settings.mcp.title": "MCP Manager",

@@ -773,6 +773,7 @@
   "page.settings.logging.url": "请求 URL",
   "page.settings.logging.header": "请求头",
   "page.settings.logging.body": "请求体",
+  "page.settings.logging.body_file": "请求体写入文件",
   "page.settings.download.title": "下载目录",
   "page.settings.download.desc": "下载任务默认保存目录",
   "page.settings.mcp.title": "MCP 管理",
