@@ -735,7 +735,9 @@ function renderSelectedModelSamplingSettings() {
         { nameKey: 'param.server.repeat_penalty.name', nameFallback: '重复惩罚', descKey: 'param.server.repeat_penalty.desc', descFallback: '抑制近期重复 token。', flag: '--repeat-penalty', id: 'SamplingFieldRepeatPenalty', value: s.repeatPenalty },
         { nameKey: 'param.server.frequency_penalty.name', nameFallback: '频率惩罚', descKey: 'param.server.frequency_penalty.desc', descFallback: '按出现次数抑制重复。', flag: '--frequency-penalty', id: 'SamplingFieldFrequencyPenalty', value: s.frequencyPenalty },
         { nameKey: 'param.server.dry_multiplier.name', nameFallback: 'DRY 惩罚倍数', descKey: 'param.server.dry_multiplier.desc', descFallback: '控制 DRY 重复抑制强度。', flag: '--dry-multiplier', id: 'SamplingFieldDryMultiplier', value: s.dryMultiplier },
-        { nameKey: 'param.server.dry_base.name', nameFallback: 'DRY 惩罚底数', descKey: 'param.server.dry_base.desc', descFallback: '控制 DRY 惩罚增长速度。', flag: '--dry-base', id: 'SamplingFieldDryBase', value: s.dryBase }
+        { nameKey: 'param.server.dry_base.name', nameFallback: 'DRY 惩罚底数', descKey: 'param.server.dry_base.desc', descFallback: '控制 DRY 惩罚增长速度。', flag: '--dry-base', id: 'SamplingFieldDryBase', value: s.dryBase },
+        { nameKey: 'param.server.dry_allowed_length.name', nameFallback: 'DRY 允许重复长度', descKey: 'param.server.dry_allowed_length.desc', descFallback: '重复多长才开始惩罚。', flag: '--dry-allowed-length', id: 'SamplingFieldDryAllowedLength', value: s.dryAllowedLength },
+        { nameKey: 'param.server.dry_penalty_last_n.name', nameFallback: 'DRY 扫描窗口', descKey: 'param.server.dry_penalty_last_n.desc', descFallback: 'DRY 重复检测的回看范围。', flag: '--dry-penalty-last-n', id: 'SamplingFieldDryPenaltyLastN', value: s.dryPenaltyLastN }
     ];
     const fieldHtml = fields.map((item) => renderModelSamplingField(item)).join('');
     const seedFieldHtml = renderModelSamplingField({ nameKey: 'param.server.seed.name', nameFallback: '随机种子', descKey: 'param.server.seed.desc', descFallback: '固定后可提高输出可复现性；-1 表示使用随机种子。', flag: '--seed', id: 'SamplingFieldSeed', value: s.seed });

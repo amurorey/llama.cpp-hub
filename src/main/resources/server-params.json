@@ -266,6 +266,32 @@
     "groupCollapsed": true
   },
   {
+    "name": "param.server.dry_allowed_length.name",
+    "fullName": "--dry-allowed-length",
+    "abbreviation": "--dry-allowed-length",
+    "type": "INTEGER",
+    "defaultValue": "2",
+    "description": "param.server.dry_allowed_length.desc",
+    "sort": 15.5,
+	"defaultEnabled": false,
+    "group": "page.params.group.sampling",
+    "groupOrder": 20,
+    "groupCollapsed": true
+  },
+  {
+    "name": "param.server.dry_penalty_last_n.name",
+    "fullName": "--dry-penalty-last-n",
+    "abbreviation": "--dry-penalty-last-n",
+    "type": "INTEGER",
+    "defaultValue": "-1",
+    "description": "param.server.dry_penalty_last_n.desc",
+    "sort": 15.6,
+	"defaultEnabled": false,
+    "group": "page.params.group.sampling",
+    "groupOrder": 20,
+    "groupCollapsed": true
+  },
+  {
     "name": "param.server.batch_size.name",
     "fullName": "--batch-size",
     "abbreviation": "-b",
